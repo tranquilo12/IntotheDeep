@@ -113,7 +113,9 @@ if __name__ == "__main__":
         max_tokens = get_max_tokens_slider()
 
         # For the model name
-        model_names = get_model_names_dropdown()
+        # Gradio's internal model_name variable clashes with this,
+        # so shortened it to m_names
+        m_names = get_model_names_dropdown()
 
         # Get the new system prompt modifier
         alt_system_message = get_new_system_prompt()
@@ -132,7 +134,7 @@ if __name__ == "__main__":
 
                             # Trigger the file explorer
                             choose_dir = gr.Button(
-                                value="Submit Directory",
+                                value="Choose Directory",
                                 variant="primary",
                                 size="sm",
                             )
@@ -143,10 +145,8 @@ if __name__ == "__main__":
                             ).then(
                                 lambda: gr.update(variant="secondary"), [], [choose_dir]
                             )
-
                         with gr.Row():  # Render the file explorer window
                             file_explorer.render()
-
                         with gr.Row():  # Render the "choose files" button
                             choose_files = gr.Button(
                                 value="Choose Files",
@@ -160,16 +160,12 @@ if __name__ == "__main__":
                                 outputs=[file_explorer],
                             )
 
-                    with gr.Column(
-                        scale=4,
-                        visible=False,
-                    ) as chatbot:
-                        with gr.Accordion(open=False, label="Model Parameters"):
-                            # The accordian contains all the tunable params of the
-                            # model. It has 2 rows, cause it's easier to see more of the
-                            # system mesage like this.
+                    with gr.Column(scale=4, visible=False, variant="panel") as chatbot:
+                        with gr.Accordion(
+                            open=False, label="Model Parameters", render=False
+                        ):
                             with gr.Row(variant="panel"):
-                                model_names.render()
+                                m_names.render()
                                 max_tokens.render()
                                 prompt_options.render()
                             with gr.Row(variant="panel"):
@@ -178,14 +174,16 @@ if __name__ == "__main__":
                         # Render the chat interface
                         gr.ChatInterface(
                             respond,  # Contains msg, history as default params included.
+                            chatbot=gr.Chatbot(height=800, render=False),
                             additional_inputs=[
                                 file_explorer,
-                                model_names,
+                                m_names,
                                 max_tokens,
                                 alt_system_message,
                                 prompt_options,
                             ],
                             analytics_enabled=False,
+                            fill_height=True,
                         ).queue()
 
                 chatbot_state = gr.State(False)

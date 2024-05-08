@@ -112,8 +112,7 @@ def get_max_tokens_slider(scale=None):
 
 def get_model_names_dropdown():
     return gr.Dropdown(
-        choices=["gpt-4-0125-preview", "gpt-3.5-turbo"],  # removed anthropic for now
-        # value="gpt-4-0125-preview",
+        choices=["gpt-4-0125-preview", "gpt-3.5-turbo"],
         value="gpt-3.5-turbo",
         label="Model Name",
         render=False,
