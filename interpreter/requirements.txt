@@ -1,0 +1,9 @@
+boto3
+GitPython
+openai
+pydantic
+python-dotenv
+jupyter 
+jupyter_kernel_gateway
+nbformat
+chainlit

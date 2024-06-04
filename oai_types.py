@@ -1,15 +1,32 @@
 from uuid import uuid4
 from litellm import acompletion
-from typing import List, Union, Dict
-from pydantic import BaseModel, Field
+import base64
+import tiktoken
+from typing import List, Union, Dict, Literal, Optional
+from pydantic import BaseModel, Field, computed_field
 
 
 class TextContent(BaseModel):
+    type: Literal["text"] = "text"
     text: str
+
+    def tokens(self, enc: tiktoken.Encoding) -> int:
+        return len(enc.encode(self.text))
 
 
 class ImageContent(BaseModel):
-    image_url: str
+    type: Literal["image_url"] = "image_url"
+    image_url: Optional[str | Dict[str, str]]
+
+    @classmethod
+    def validate_image_path(cls, image_url):
+        with open(image_url, "rb") as image_file:
+            encoded_image = base64.b64encode(image_file.read()).decode("utf-8")
+            image_url = {"url": f"data:image/jpeg;base64,{encoded_image}"}
+        return image_url
+
+    def tokens(self, enc: tiktoken.Encoding) -> int:
+        return len(enc.encode(self.image_url))
 
 
 class User(BaseModel):
@@ -42,17 +59,29 @@ class Conversation(BaseModel):
     messages: List[Union[User, Assistant, System]] = Field(default_factory=list)
     functions: List = Field(default=list)
 
+    def __get_encoding__(self):
+        if self.model_name is not None:
+            if "gpt" in self.model_name.lower():
+                return tiktoken.encoding_for_model(self.model_name)
+
+    @computed_field(return_type=int)
+    @property
+    def total_tokens(self):
+        return sum(
+            [msg.content.tokens(enc=self.__get_encoding__()) for msg in self.messages]
+        )
+
     def update_system_message(self, msg: str):
         self.messages[0] = System(msg)
 
-    def add_user_msg(self, msg: str):
-        self.messages.append(User(msg=msg))
-
-    def add_assistant_msg(self, msg: str):
-        self.messages.append(Assistant(msg=msg))
-
     def append(self, message: Union[User, Assistant, System]):
         self.messages.append(message)
+
+    def add_user_msg(self, msg: str):
+        self.append(User(msg=msg))
+
+    def add_assistant_msg(self, msg: str):
+        self.append(Assistant(msg=msg))
 
     def to_dict(self) -> List[Dict[str, str]]:
         return [
@@ -69,22 +98,23 @@ class Conversation(BaseModel):
         )
 
         if stream:
-            partial_message = ""
             async for chunk in response:
-                if chunk.choices:
-                    if (chunk.choices[0].delta.content is not None) and (
-                        len(chunk.choices[0].delta.content) > 0
-                    ):
-                        partial_message += chunk.choices[0].delta.content
-                        yield partial_message
+                if token := chunk.choices[0].delta.content or "":
+                    yield token
         else:
             yield response.choices[0].message.content
             return
 
-    async def _continue(self, max_tokens: int):
+    async def _continue(self, max_tokens: int, code_only: bool = False):
+        # Ensure that we get the code only in the last message
+        if code_only:
+            latest_message = self.messages[-1].content.text
+            latest_message += "\n Please ensure that you only provide python code in your response. Please start with ```python."
+            self.messages[-1].content.text = latest_message
+
         response = self.call_llm(max_tokens=max_tokens, stream=False)
-        response = "".join([p async for p in response])
-        self.messages.append(Assistant(response))
+        assistant_message = Assistant("".join([p async for p in response]))
+        self.append(assistant_message)
 
 
 class Conversations(BaseModel):

@@ -9,7 +9,6 @@ from typing import (
     AsyncIterator,
     Optional,
     Union,
-    Tuple,
     List,
     Dict,
     Any,
@@ -26,6 +25,37 @@ load_dotenv()
 #############################################
 ## For all generic utils functions
 #############################################
+
+import more_itertools as mit
+
+
+def chunk_words(text, chunk_size, overlap):
+    """
+    # Example usage
+    text = (
+        "This is an example of a text that needs to be chunked into overlapping segments."
+    )
+    chunk_size = 5
+    overlap = 2
+
+    chunks = chunk_words(text, chunk_size, overlap)
+    chunks_with_text = [" ".join(chunk).strip() for chunk in chunks]
+    for chunk in chunks_with_text:
+        print(chunk)
+
+    Parameters:
+    ----------
+    text: str = The text to be split
+    chunk_size: int = Self explanatory
+    overlap: int = Also, self explanatory
+
+    Returns:
+    ---------
+    List = A list of chunks of the original string.
+    """
+    words = text.split()
+    step = chunk_size - overlap
+    return list(mit.windowed(words, n=chunk_size, step=step, fillvalue=""))
 
 
 def str_to_path(path: str | List) -> Optional[WindowsPath | PosixPath]:
@@ -435,26 +465,27 @@ def extract_code_from_response(response: str) -> str:
 
 
 async def gen_and_debug_python_code(
-    convo: Conversation,
-    max_tokens: int,
-    max_attempts: int = 5,
+    convo: Conversation, max_tokens: int, max_attempts: int = 5, log: bool = False
 ) -> Conversation:
 
     # TODO, add a loading tag here.
     # Call the OpenAI or Claude API with the conversation
     # And add the response to the conversation
-    await convo._continue(max_tokens=max_tokens)
-
-    # Extract the generated code from the assistant's response
+    await convo._continue(max_tokens=max_tokens, code_only=True)
     code = extract_code_from_response(convo.messages[-1].content.text)
 
-    # Process the generated code response
-    # Execute the generated code and handle the response
+    # Execute the generated code, handle the response
+    # And lower the max_attempts flag
     stdout, stderr = await execute_code_locally(code=code)
+    max_attempts -= 1
 
-    # If there's an error, enter a loop to attempt to correct it
-    if stderr != "":
-        while max_attempts > 0:
+    if log:
+        print(f"\n\n{code=}\n\n")
+        print(f"\n{stdout=}\n\n")
+        print(f"\n{stderr=}\n\n")
+
+    if stderr != "":  # If error, enter a recursive loop to attempt to correct it
+        if max_attempts > 0:
             convo.add_user_msg(
                 "".join(
                     [
@@ -470,20 +501,16 @@ async def gen_and_debug_python_code(
                 convo=convo, max_tokens=max_tokens, max_attempts=max_attempts
             )
 
-            # If there's no error, break the loop
-            if not stderr:
-                convo.add_assistant_msg(f"Here executed code output: {stdout}")
-                break
-            else:
-                max_attempts -= 1
+        else:  # After the max amount of attempts
+            latest_message = convo.messages[-1].content.text
+            convo.add_assistant_msg(
+                f"The code generated: \n{latest_message} \n\n after {max_attempts} attempts has generated the following error: \n {stderr}"
+            )
 
-    if stderr != "":
+    else:  # if there's no error, then just add the assistant message
+        latest_message = convo.messages[-1].content.text
         convo.add_assistant_msg(
-            f"The code generated:\n{convo.messages[-1].content.text},\n\n after {max_attempts} attempts has generated the following error:\n {stderr}."
-        )
-    else:
-        convo.add_assistant_msg(
-            f"The code generated:\n{convo.messages[-1].content.text},\n\n has generated the following output:\n {stdout}"
+            f"The code generated: \n{latest_message} \n\n has generated the following output:\n {stdout}"
         )
 
     return convo
