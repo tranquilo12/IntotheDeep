@@ -50,23 +50,34 @@ async def on_message(message: cl.Message):
     CONVO: Conversation = cl.user_session.get("CONVO")  # Get cached object
     CONVO.add_user_msg(msg=message.content)  # ingest user message
 
-    # Streaming now
+    # Instanciate empty message, for streaming into later
     streaming_response = cl.Message(content="")
     await streaming_response.send()
 
-    stream = CONVO.call_llm(stream=True, max_tokens=100)
+    # Start streaming!
+    stream = CONVO.call_llm(stream=True, max_tokens=500)
+    complete_response = []
     async for part in stream:
+        complete_response += [part]
         await streaming_response.stream_token(part)
 
-    # Update the conversation with assistant message and save it
-    CONVO.add_assistant_msg(msg=part)
+    # Update convo with assistant message, save it
+    CONVO.add_assistant_msg(msg="".join(complete_response))
     cl.user_session.set("CONVO", CONVO)
 
-    total_tokens = CONVO.total_tokens
-    elements = [cl.Text(name="Token Count", content=str(total_tokens))]
+    # Need an element that keeps track of the total tokens used.
+    elements = [cl.Text(name="Token Count", content=str(CONVO.total_tokens))]
     streaming_response.elements = elements
 
     await streaming_response.update()
+
+
+# @cl.on_chat_start
+# async def main():
+#     msg = cl.Message(content="")
+#     for token in token_list:
+#         await msg.stream_token(token)
+#     await msg.send()
 
 
 if __name__ == "__main__":
