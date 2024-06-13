@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from git import Repo, GitCommandError
 
-from oai_types import Conversation, User, Assistant, System
+from oai_types import Conversation, User, Assistant, System, ExecCodeLocallyTool
 
 load_dotenv()
 
@@ -215,28 +215,11 @@ def init_convo(
     ]
 
     # Create the conversation object
-    if model_name is not None:
-        conversation = Conversation(messages_=messages, model_name=model_name)
-    else:
-        conversation = Conversation(messages_=messages)
-
-    # Add the execute_code_locally function to the conversation
-    # conversation.tools = [
-    #     {
-    #         "name": "execute_code_locally",
-    #         "description": "Executes the provided Python code locally and returns the output and any error messages.",
-    #         "parameters": {
-    #             "type": "object",
-    #             "properties": {
-    #                 "code": {
-    #                     "type": "string",
-    #                     "description": "The Python code to execute.",
-    #                 }
-    #             },
-    #             "required": ["code"],
-    #         },
-    #     }
-    # ]
+    conversation = Conversation(
+        model_name=model_name,
+        messages_=messages,
+        functions=[ExecCodeLocallyTool().model_dump()],
+    )
 
     return conversation
 

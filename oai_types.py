@@ -2,16 +2,42 @@ import json
 import base64
 import tiktoken
 import logging
+import asyncio
 from uuid import uuid4
 from litellm import acompletion
 from interpreter import execute_code_locally
-from typing import List, Union, Dict, Literal, Optional, Callable
 from pydantic import BaseModel, Field, computed_field
+from typing import List, Union, Dict, Literal, Optional, Callable, Any
 
 
 #############################################
 ########## LLM related types ################
 #############################################
+class CodeExecutionContent(BaseModel):
+    type: Literal["code_execution"] = "code_execution"
+    code: str  # The executed code
+    stdout: str  # Standard output from execution
+    stderr: Optional[str] = None  # Standard error (if any)
+
+    @computed_field
+    @property
+    def text(self) -> str:
+        """Generates formatted Markdown text for code and output."""
+        markdown_text = f"`python\n{self.code}\n`\n\n"
+
+        if self.stdout:
+            markdown_text += f"**Output:**\n`\n{self.stdout}\n`\n\n"
+
+        if self.stderr:
+            markdown_text += f"**Error:**\n`\n{self.stderr}\n`"
+
+        return markdown_text
+
+    def tokens(self, enc: tiktoken.Encoding) -> int:
+        # Use the generated markdown text for token counting
+        return len(enc.encode(self.text))
+
+
 class TextContent(BaseModel):
     type: Literal["text"] = "text"
     text: str
@@ -45,10 +71,31 @@ class User(BaseModel):
 
 class Assistant(BaseModel):
     role: str = "assistant"
-    content: TextContent
+    content: Union[
+        TextContent, CodeExecutionContent
+    ]  # Allow either TextContent or CodeExecutionContent
+    name: Optional[str] = None
+    tool_call_id: Optional[str] = None
 
-    def __init__(self, msg: str, **data):
-        super().__init__(content=TextContent(text=msg), **data)
+    def __init__(
+        self,
+        msg: str = None,
+        name: str = None,
+        tool_call_id: str = None,
+        code: str = None,
+        stdout: str = None,
+        stderr: str = None,
+        **data,
+    ):
+
+        if msg:  # If a regular text message is provided
+            content = TextContent(text=msg)
+        elif code is not None and stdout is not None:  # If code and output are provided
+            content = CodeExecutionContent(code=code, stdout=stdout, stderr=stderr)
+        else:
+            raise ValueError("Either msg or (code and stdout) must be provided")
+
+        super().__init__(content=content, name=name, tool_call_id=tool_call_id, **data)
 
 
 class System(BaseModel):
@@ -62,36 +109,41 @@ class System(BaseModel):
 #############################################
 ############### For all tools ###############
 #############################################
-class CodeParameter(BaseModel):
-    code: str = Field(
-        ...,
-        description="The valid python code, extracted from the response, to execute locally.",
-    )
+class ExecCodeLocallyParam(BaseModel):
+    type: Literal["object"] = "object"
+    properties: Dict[str, Dict[str, str]] = {
+        "code": {
+            "type": "string",
+            "description": "The python code to be executed locally. It should be properly formatted.",
+        }
+    }
+    required: List[str] = ["code"]
 
 
-class ExecCodeLocally(BaseModel):
-    name: str = Field(default="execute_code_locally")
-    description: str = Field(
-        default="A function that takes in a parameter 'code' which contains valid python code, returns (stdout, stderr)."
+class ExecCodeLocallyFunction(BaseModel):
+    name: str = "execute_code_locally"
+    description: str = (
+        "A function that executes the given Python code locally and returns the output (stdout) and error (stderr). "
+        "It requires a 'code' parameter containing valid Python code."
     )
-    parameters: CodeParameter = Field(default=None)
+    parameters: ExecCodeLocallyParam = Field(default_factory=ExecCodeLocallyParam)
 
 
 class ExecCodeLocallyTool(BaseModel):
-    type: Literal["function"] = Field(default="function")
-    function: ExecCodeLocally = Field(default=None)
-
-
-#############################################
-############ For all tool choices ###########
-#############################################
-class ToolFunction(BaseModel):
-    name: Literal["gen_python_code_no_debug", "execute_code_locally"]
-
-
-class ExecCodeLocallyToolChoice(BaseModel):
-    type: Literal["function"] = Field(default="function")
-    function: ToolFunction = Field(default=ToolFunction(name="execute_code_locally"))
+    name: str = "execute_code_locally"
+    description: str = (
+        "A function that executes the given Python code locally and returns the output (stdout) and error (stderr)."
+    )
+    parameters: Dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "code": {
+                "type": "string",
+                "description": "The python code to be executed locally. It should be properly formatted.",
+            }
+        },
+        "required": ["code"],
+    }
 
 
 #############################################
@@ -183,10 +235,13 @@ async def gen_python_code_with_debug(
 #############################################
 class Conversation(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
-    model_name: str = Field(default="gpt-3.5-turbo")
+    model_name: str = Field(default="gpt-3.5-turbo-0125")
     messages_: List[Union[User, Assistant, System]] = Field(default_factory=list)
     tools: List = Field(default=None)
     tool_choice: Dict = Field(default=None)
+    pending_function_calls: Dict = Field(default={})
+    pending_function_calls_queue: List = Field(default=[])
+    active_function_call: str = Field(default="")
 
     @property
     def available_functions(self) -> Dict[str, Callable]:
@@ -225,8 +280,7 @@ class Conversation(BaseModel):
             "stream": stream,
             "max_tokens": max_tokens,
             "temperature": 0.0,
-            "tools": self.tools,
-            "tool_choice": self.tool_choice,
+            "functions": [ExecCodeLocallyTool().model_dump()],
         }
 
     def update_system_message(self, msg: str):
@@ -238,8 +292,34 @@ class Conversation(BaseModel):
     def add_user_msg(self, msg: str):
         self.append(User(msg=msg))
 
-    def add_assistant_msg(self, msg: str):
-        self.append(Assistant(msg=msg))
+    async def add_assistant_msg(
+        self,
+        msg: str = None,
+        name: str = None,
+        tool_call_id: str = None,
+        code: str = None,
+        stdout: str = None,
+        stderr: str = None,
+    ):
+        """Asynchronously adds an assistant message to the conversation."""
+        if msg is not None:
+            assistant_message = Assistant(msg=msg, name=name, tool_call_id=tool_call_id)
+        elif code is not None and stdout is not None:
+            if isinstance(stdout, asyncio.Future) or isinstance(stderr, asyncio.Future):
+                # If stdout or stderr are futures, await them
+                stdout, stderr = await asyncio.gather(stdout, stderr)
+
+            assistant_message = Assistant(
+                code=code,
+                stdout=stdout,
+                stderr=stderr,
+                name=name,
+                tool_call_id=tool_call_id,
+            )
+        else:
+            raise ValueError("Either msg or (code, stdout) must be provided")
+
+        self.append(assistant_message)  # Add the assistant message to the conversation
 
     def del_message(self, index: int):
         if 0 <= index < len(self.messages_):
@@ -253,48 +333,103 @@ class Conversation(BaseModel):
             for message in self.messages_
         ]
 
-    async def process_tool_calls(self, message, max_tokens):
-        tool_calls = message.get("tool_calls", [])
-        if tool_calls:
-            for tool_call in tool_calls:
-                function_name = tool_call["function"]["name"]
-                function_to_call = self.available_func[function_name]
-                function_args = json.loads(tool_call["function"]["arguments"])
-                function_response = function_to_call(code=function_args.get("code"))
-                self.messages_.append(
-                    {
-                        "tool_call_id": tool_call["id"],
-                        "role": "tool",
-                        "name": function_name,
-                        "content": function_response,
-                    }
-                )
-            second_response = await acompletion(
-                model=self.model_name,
-                messages=self.to_dict(),
-                stream=False,
-                max_tokens=max_tokens,
-                temperature=0.0,
-            )
-            yield second_response.choices[0].message.content
+    async def process_tool_calls(self, message):
+        """
+        Handles function calls received in the streamed LLM response, potentially in multiple chunks.
+
+        This function now accumulates function call arguments and remembers the
+        function name even if it's not repeated in subsequent chunks.
+
+        Args:
+            message: The message chunk from the LLM stream.
+            max_tokens: Maximum tokens for any subsequent LLM calls after function execution.
+
+        Yields:
+            An empty string to maintain the stream flow.
+        """
+
+        function_call = message.get("function_call")
+        if function_call:
+            function_name = function_call.name
+            function_args = function_call.arguments
+
+            # Track the active function call
+            if function_name:  # Update active function if provided
+                self.active_function_call = function_name
+            else:
+                function_name = self.active_function_call  # Use the remembered name
+
+            if function_name not in self.pending_function_calls:
+                self.pending_function_calls[function_name] = ""
+
+            self.pending_function_calls[function_name] += function_args
+
+            # If the function call arguments are complete, move them to the queue
+            if function_args.endswith("}"):  # Assuming JSON format for arguments
+                args = self.pending_function_calls.pop(
+                    function_name
+                )  # Remove from pending_function_calls
+                try:
+                    parsed_args = json.loads(args)
+                except json.JSONDecodeError as e:
+                    print(f"Error parsing function arguments: {e}")
+                    parsed_args = {}
+
+                self.pending_function_calls_queue.append((function_name, parsed_args))
+
+        yield ""  # Continue the stream without waiting for the function result
 
     async def call_llm(self, max_tokens: int, stream: bool):
-        try:
-            request_payload = self.__request_payload__(max_tokens, stream)
-            response = await acompletion(**request_payload)
+        """
+        Makes a call to the LLM, handling streaming and deferred function calls.
 
+        Args:
+            max_tokens: Maximum tokens for the LLM response.
+            stream: Whether the response should be streamed.
+
+        Yields:
+            Tokens from the LLM response stream, or an empty string if waiting for function calls.
+        """
+        try:
+            response = await acompletion(**self.__request_payload__(max_tokens, stream))
             if stream:
                 async for chunk in response:
                     if token := chunk.choices[0].delta.content or "":
                         yield token
-                        if "tool_calls" in chunk.choices[0].delta:
-                            await self.process_tool_calls(
-                                chunk.choices[0].delta, max_tokens
-                            )
+                    if "function_call" in chunk.choices[0].delta:
+                        m_ = chunk.choices[0].delta
+                        async for result in self.process_tool_calls(m_):
+                            yield result
+
             else:
                 first_response_message = response.choices[0].message
                 yield first_response_message.content
-                await self.process_tool_calls(first_response_message, max_tokens)
+
+            # Execute any pending function calls after the stream completes or after a non-streamed response
+            for function_name, function_args in self.pending_function_calls_queue:
+                function_to_call = self.available_functions[function_name]
+                function_response = await function_to_call(
+                    code=function_args.get("code")
+                )  # Await asynmax_token function
+
+                stdout, stderr = function_response
+                await self.add_assistant_msg(
+                    code=function_args.get("code"),
+                    stdout=stdout,
+                    stderr=stderr,
+                    name=function_name,
+                )
+
+                # Fetch additional response after function call
+                # second_response = await acompletion(
+                #     **self.__request_payload__(max_tokens, False)
+                # )
+                # self.add_assistant_msg(msg=second_response.choices[0].message.content)
+
+            # Clear pending function calls after execution
+            self.pending_function_calls = {}
+            self.pending_function_calls_queue = []
+
         except Exception as e:
             logging.exception("Error in call_llm: %s", str(e))
             raise

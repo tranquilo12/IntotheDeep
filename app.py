@@ -62,7 +62,8 @@ async def on_message(message: cl.Message):
         await streaming_response.stream_token(part)
 
     # Update convo with assistant message, save it
-    CONVO.add_assistant_msg(msg="".join(complete_response))
+    # await CONVO.add_assistant_msg(msg="".join(complete_response))
+    streaming_response.content = CONVO.messages_[-1].content.text
     cl.user_session.set("CONVO", CONVO)
 
     # Need an element that keeps track of the total tokens used.
@@ -70,14 +71,6 @@ async def on_message(message: cl.Message):
     streaming_response.elements = elements
 
     await streaming_response.update()
-
-
-# @cl.on_chat_start
-# async def main():
-#     msg = cl.Message(content="")
-#     for token in token_list:
-#         await msg.stream_token(token)
-#     await msg.send()
 
 
 if __name__ == "__main__":
