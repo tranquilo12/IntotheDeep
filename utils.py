@@ -9,7 +9,6 @@ from typing import (
     AsyncIterator,
     Optional,
     Union,
-    Tuple,
     List,
     Dict,
     Any,
@@ -18,14 +17,45 @@ from typing import (
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from git import Repo, GitCommandError
-from interpreter import execute_code_locally
-from oai_types import Conversation, User, Assistant, System
+
+from oai_types import Conversation, User, Assistant, System, ExecCodeLocallyTool
 
 load_dotenv()
 
 #############################################
 ## For all generic utils functions
 #############################################
+
+import more_itertools as mit
+
+
+def chunk_words(text, chunk_size, overlap):
+    """
+    # Example usage
+    text = (
+        "This is an example of a text that needs to be chunked into overlapping segments."
+    )
+    chunk_size = 5
+    overlap = 2
+
+    chunks = chunk_words(text, chunk_size, overlap)
+    chunks_with_text = [" ".join(chunk).strip() for chunk in chunks]
+    for chunk in chunks_with_text:
+        print(chunk)
+
+    Parameters:
+    ----------
+    text: str = The text to be split
+    chunk_size: int = Self explanatory
+    overlap: int = Also, self explanatory
+
+    Returns:
+    ---------
+    List = A list of chunks of the original string.
+    """
+    words = text.split()
+    step = chunk_size - overlap
+    return list(mit.windowed(words, n=chunk_size, step=step, fillvalue=""))
 
 
 def str_to_path(path: str | List) -> Optional[WindowsPath | PosixPath]:
@@ -185,28 +215,12 @@ def init_convo(
     ]
 
     # Create the conversation object
-    if model_name is not None:
-        conversation = Conversation(messages=messages, model_name=model_name)
-    else:
-        conversation = Conversation(messages=messages)
+    conversation = Conversation(
+        model_name=model_name,
+        messages_=messages,
+        functions=[ExecCodeLocallyTool().model_dump()],
+    )
 
-    # Add the execute_code_locally function to the conversation
-    conversation.functions = [
-        {
-            "name": "execute_code_locally",
-            "description": "Executes the provided Python code locally and returns the output and any error messages.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "code": {
-                        "type": "string",
-                        "description": "The Python code to execute.",
-                    }
-                },
-                "required": ["code"],
-            },
-        }
-    ]
     return conversation
 
 
@@ -277,7 +291,9 @@ def convert_convo_to_history(conversation: Conversation) -> List[List[str]]:
         List of strings
 
     """
-    messages: List[str] = [message.content[0].text for message in conversation.messages]
+    messages: List[str] = [
+        message.content[0].text for message in conversation.messages_
+    ]
     pairs_of_messages: List[List[str]] = convert_to_pairs(messages)
     return pairs_of_messages
 
@@ -303,19 +319,20 @@ def convert_history_to_convo(
     # Depending on the discard_first_pair flag, the history will be appended with the starting messages
     if model_name is not None:
         conversation = Conversation(
-            messages=[System(history[0][0]), User(history[0][1])], model_name=model_name
+            messages_=[System(history[0][0]), User(history[0][1])],
+            model_name=model_name,
         )
     else:
         conversation = Conversation(
-            messages=[System(history[0][0]), User(history[0][1])]
+            messages_=[System(history[0][0]), User(history[0][1])]
         )
 
     # Add the history to the conversation
     for pair in history[1:]:
-        conversation.messages.append(Assistant(pair[0]))
+        conversation.messages_.append(Assistant(pair[0]))
 
         if len(pair) > 1:
-            conversation.messages.append(User(pair[1]))
+            conversation.messages_.append(User(pair[1]))
 
     return conversation
 
@@ -411,79 +428,4 @@ def get_git_commit_prompt(diff: GitFileDiff) -> Conversation:
     # Create the assistant message
     assistant_message = Assistant("")
     # Create the conversation object
-    return Conversation(messages=[system_message, user_message, assistant_message])
-
-
-#############################################
-## For code interpreter related functions
-#############################################
-
-
-def extract_code_from_response(response: str) -> str:
-    case_1 = "```python"
-    case_2 = "<code>"
-    case_3 = "<python>"
-
-    if case_1 in response:
-        return response.split(case_1)[1].split("```")[0].strip()
-    elif case_2 in response:
-        return response.split(case_2)[1].split("</code")[0].strip()
-    elif case_3 in response:
-        return response.split(case_3)[1].split("</python")[0].strip()
-    else:
-        return response
-
-
-async def gen_and_debug_python_code(
-    convo: Conversation,
-    max_tokens: int,
-    max_attempts: int = 5,
-) -> Conversation:
-
-    # TODO, add a loading tag here.
-    # Call the OpenAI or Claude API with the conversation
-    # And add the response to the conversation
-    await convo._continue(max_tokens=max_tokens)
-
-    # Extract the generated code from the assistant's response
-    code = extract_code_from_response(convo.messages[-1].content.text)
-
-    # Process the generated code response
-    # Execute the generated code and handle the response
-    stdout, stderr = await execute_code_locally(code=code)
-
-    # If there's an error, enter a loop to attempt to correct it
-    if stderr != "":
-        while max_attempts > 0:
-            convo.add_user_msg(
-                "".join(
-                    [
-                        f"Please debug the above code that you have generated, it causes the following error: {stderr}. ",
-                        "Take some time to think about your solution, within <thinking> tags.",
-                        "Please provide the corrected code within '```python' and '```' tags. ",
-                    ]
-                )
-            )
-
-            # Recursively call self, to execute code locally
-            convo = await gen_and_debug_python_code(
-                convo=convo, max_tokens=max_tokens, max_attempts=max_attempts
-            )
-
-            # If there's no error, break the loop
-            if not stderr:
-                convo.add_assistant_msg(f"Here executed code output: {stdout}")
-                break
-            else:
-                max_attempts -= 1
-
-    if stderr != "":
-        convo.add_assistant_msg(
-            f"The code generated:\n{convo.messages[-1].content.text},\n\n after {max_attempts} attempts has generated the following error:\n {stderr}."
-        )
-    else:
-        convo.add_assistant_msg(
-            f"The code generated:\n{convo.messages[-1].content.text},\n\n has generated the following output:\n {stdout}"
-        )
-
-    return convo
+    return Conversation(messages_=[system_message, user_message, assistant_message])

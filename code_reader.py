@@ -96,13 +96,25 @@ async def respond(
             yield partial_message
 
 
+def dummy_response(
+    msg: str,
+    history: List,
+    file_paths: List,
+    model_name: str,
+    max_tokens: int,
+    new_system_prompt: str,
+    prompt_options: List,
+):
+    yield "Check message"
+
+
 def toggle_chatbot_ui(state):
     state = not state
     return gr.update(visible=state), state
 
 
 if __name__ == "__main__":
-    with gr.Blocks(css=css_code) as demo:
+    with gr.Blocks(css=css_code, analytics_enabled=False) as demo:
         # Init the file explorer
         file_explorer = gr.FileExplorer(render=False, glob="**/*.py")
 
@@ -126,6 +138,7 @@ if __name__ == "__main__":
         # You want to ensure that it's rendering after the button is clicked.
         with gr.Tabs():
             with gr.TabItem("Chat with your Files", id=0):
+
                 with gr.Row(equal_height=False):
                     with gr.Column(scale=1, visible=True):
                         with gr.Row():
@@ -159,21 +172,18 @@ if __name__ == "__main__":
                                 inputs=[repo_path],
                                 outputs=[file_explorer],
                             )
+                        with gr.Row(variant="panel"):  # For the alt system message
+                            alt_system_message.render()
+                        with gr.Row(variant="panel"):  # For model params
+                            m_names.render()
+                            max_tokens.render()
+                            prompt_options.render()
 
                     with gr.Column(scale=4, visible=False, variant="panel") as chatbot:
-                        with gr.Accordion(
-                            open=False, label="Model Parameters", render=False
-                        ):
-                            with gr.Row(variant="panel"):
-                                m_names.render()
-                                max_tokens.render()
-                                prompt_options.render()
-                            with gr.Row(variant="panel"):
-                                alt_system_message.render()
-
                         # Render the chat interface
                         gr.ChatInterface(
                             respond,  # Contains msg, history as default params included.
+                            # dummy_response,
                             chatbot=gr.Chatbot(height=800, render=False),
                             additional_inputs=[
                                 file_explorer,
@@ -191,75 +201,5 @@ if __name__ == "__main__":
                 toggle_chatbot.click(
                     toggle_chatbot_ui, [chatbot_state], [chatbot, chatbot_state]
                 ).then(lambda: gr.update(visible=False), [], [toggle_chatbot])
-
-                # # with gr.Row(equal_height=True):
-                #     # The entire stdout of the code ouput
-                #     gr.TextArea()
-
-            # with gr.TabItem("Git Commit Message", id=2):
-
-            #     def git_commit_response(dir_path: os.PathLike | str, model_name: str):
-            #         global stream_stop_flag
-            #         stream_stop_flag = False
-            #         diffs = get_latest_changes_within_git(dir_path)
-            #         all_responses = ""
-
-            #         for diff in diffs:
-            #             convo = get_git_commit_prompt(diff)
-            #             response = call_llm(
-            #                 conversation=convo,
-            #                 max_tokens=max_tokens,
-            #                 model_name=model_name,
-            #             )
-            #             for all_responses in response:
-            #                 if stream_stop_flag:
-            #                     return
-            #                 yield all_responses
-
-            #     # Get the markdown component
-            #     with gr.Row(variant="panel"):
-            #         git_commit_message = gr.TextArea(
-            #             label="Git Commit Message", visible=True
-            #         )
-
-            #     # Render the dropdown menu for selecting the model
-            #     with gr.Row(variant="panel"):
-            #         model_names = gr.Dropdown(
-            #             label="Model Name",
-            #             value="gpt-4-0125-preview",
-            #             choices=ModelNames.oai_to_list(),
-            #         )
-
-            #     with gr.Row(variant="panel"):
-            #         stage_all_changes = gr.Button(
-            #             value="Stage All Changes",
-            #             variant="primary",
-            #             size="sm",
-            #             scale=1,
-            #         )
-            #         stage_all_changes.click(
-            #             fn=stage_changes,
-            #         )
-
-            #     # Render a button to generate the git commit message
-            #     with gr.Row(variant="panel"):
-            #         generate_commit_message = gr.Button(
-            #             value="Generate Commit Message", variant="secondary", scale=1
-            #         )
-
-            #         generate_commit_message.click(
-            #             fn=git_commit_response,
-            #             inputs=[repo_path, model_names],
-            #             outputs=[git_commit_message],
-            #         )
-
-            #         def stop_stream_handler():
-            #             global stream_stop_flag
-            #             stream_stop_flag = True
-
-            #         stop_stream = gr.Button(
-            #             value="Stop Stream", variant="stop", scale=1
-            #         )
-            #         stop_stream.click(fn=stop_stream_handler)
 
     demo.launch(height=1000)
