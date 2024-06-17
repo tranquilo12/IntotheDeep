@@ -1,10 +1,7 @@
+import json
 import os
 import sys
-import json
-
-from litellm import acompletion
 from pathlib import WindowsPath, PosixPath
-
 from typing import (
     AsyncIterator,
     Optional,
@@ -14,19 +11,20 @@ from typing import (
     Any,
 )
 
-from pydantic import BaseModel
+import more_itertools as mit
 from dotenv import load_dotenv
 from git import Repo, GitCommandError
+from litellm import acompletion
+from pydantic import BaseModel
 
 from oai_types import Conversation, User, Assistant, System
 
 load_dotenv()
 
+
 #############################################
 ## For all generic utils functions
 #############################################
-
-import more_itertools as mit
 
 
 def chunk_words(text, chunk_size, overlap):
@@ -108,12 +106,12 @@ def read_all_files(file_paths: List) -> Optional[str]:
                 with open(filename, "r") as f:
                     content = f.read()
                     all_content += (
-                        f"\n# FILENAME : {filename}"
-                        + "\n\n"
-                        + content
-                        + "\n"
-                        + "#" * 10
-                        + "\n"
+                            f"\n# FILENAME : {filename}"
+                            + "\n\n"
+                            + content
+                            + "\n"
+                            + "#" * 10
+                            + "\n"
                     )
 
         # Nothing else will be returned if it's empty
@@ -135,7 +133,7 @@ def convert_to_pairs(input_list: List) -> List[List[str]]:
         List of pairs of strings
 
     """
-    return [input_list[i : i + 2] for i in range(0, len(input_list), 2)]
+    return [input_list[i: i + 2] for i in range(0, len(input_list), 2)]
 
 
 #############################################
@@ -145,9 +143,9 @@ def convert_to_pairs(input_list: List) -> List[List[str]]:
 
 
 def init_convo(
-    model_name: str,
-    context_code: Union[str, Any],
-    user_question: str,
+        model_name: str,
+        context_code: Union[str, Any],
+        user_question: str,
 ) -> Conversation:
     """
     Get the starting conversation for the assistant
@@ -203,10 +201,10 @@ def init_convo(
 
 
 async def call_llm(
-    conversation: Conversation,
-    max_tokens: int,
-    model_name: str,
-    stream: bool = False,
+        conversation: Conversation,
+        max_tokens: int,
+        model_name: str,
+        stream: bool = False,
 ) -> AsyncIterator | Dict[str, str]:
     """
     Call the Litellm API to get the response.
@@ -239,7 +237,7 @@ async def call_llm(
         async for chunk in response:
             if chunk.choices:
                 if (chunk.choices[0].delta.content is not None) and (
-                    len(chunk.choices[0].delta.content) > 0
+                        len(chunk.choices[0].delta.content) > 0
                 ):
                     partial_message += chunk.choices[0].delta.content
                     yield partial_message
@@ -277,8 +275,8 @@ def convert_convo_to_history(conversation: Conversation) -> List[List[str]]:
 
 
 def convert_history_to_convo(
-    history: List[List[str]],
-    model_name: str = None,
+        history: List[List[str]],
+        model_name: str = None,
 ) -> Conversation:
     """
     Convert the history to a conversation object

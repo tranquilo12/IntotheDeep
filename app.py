@@ -61,8 +61,6 @@ async def probe_llm(max_tokens: int = 4000, from_user: bool = False):
                         await CONVO.add_assistant_msg(msg=complete_response)
 
         # After the entire response is streamed
-        # streaming_response.content = complete_response
-        # await CONVO.add_assistant_msg(msg=complete_response)
         await streaming_response.update()
 
     # Cache updated conversation

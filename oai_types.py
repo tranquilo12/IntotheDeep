@@ -119,11 +119,6 @@ class CodeBlockParameter(Parameter):
     description: str = "The Python code to execute, enclosed in triple backticks (```)."
 
 
-class StringParameter(Parameter):
-    type: Literal["string"] = "string"
-    description: str
-
-
 class FunctionDefinition(BaseModel):
     name: str
     description: str
