@@ -20,6 +20,9 @@ async def probe_llm(max_tokens: int = 4000, from_user: bool = False):
     ----------
     max_tokens : int, optional
         The maximum number of tokens allowed in the LLM's response. Defaults to 500.
+
+    from_user: bool, False
+        If the message has been initiated from the user, then we're just going to ignore sending a "user message"
     """
     global TOTAL_TOKENS  # Reference global token counter
     CONVO: Conversation = cl.user_session.get("CONVO")  # Get cached object
