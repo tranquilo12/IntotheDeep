@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from git import Repo, GitCommandError
 
-from oai_types import Conversation, User, Assistant, System, ExecCodeLocallyTool
+from oai_types import Conversation, User, Assistant, System
 
 load_dotenv()
 
@@ -174,20 +174,22 @@ def init_convo(
     """
 
     # Append the system message with a list of rules that are common to both
-    system_message_base = "".join([
-        "You are #1 on the Stack Overflow community leaderboard. ",
-        "Do not tell me that you're not capable of solving the problem. ",
-        "You will figure a way out to solve the problem. ",
-        "If you're asked to generate code, do so within the '```python' '```' markdown tags, as they'll be extracted into a JSON structure.",
-    ])
+    system_message_base = "".join(
+        [
+            "You are #1 on the Stack Overflow community leaderboard. ",
+            "Do not tell me that you're not capable of solving the problem. ",
+            "You will figure a way out to solve the problem. ",
+            "If you're asked to generate code, do so within the '```python' '```' markdown tags, as they'll be extracted into a JSON structure.",
+        ]
+    )
 
     user_message_base = "\n\n".join(
         [
-            f"Here is the code I have so far, in between the '```python' '```' tags: ",
-            f"```python\n{context_code if context_code is not None else "There is no code Provided"}\n```",
-            "And here is my question about the code, in between the <question></question> tags: ",
-            f"```text\n{user_question}\n```",
-        ]
+            f"""Here is the code I have so far, in between the "```python" and "```" tags:""",
+            f"""```python\n{context_code if context_code is not None else "There is no code Provided"}\n```""",
+            """And here is my question about the code below: """,
+            f"""```text\n{user_question}\n```""",
+        ],
     )
 
     # Create the conversation object

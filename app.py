@@ -1,52 +1,68 @@
 import chainlit as cl
 from dotenv import load_dotenv
-from utils import init_convo
-from oai_types import Conversation
+from litellm.utils import Delta
+
 from models import ModelNames
+from oai_types import Conversation
+from utils import init_convo
 
 load_dotenv()
-
 
 # Global variable to track token count across sessions (optional)
 TOTAL_TOKENS: int = 0
 
 
-async def probe_llm(max_tokens: int = 500):
+async def probe_llm(max_tokens: int = 4000, from_user: bool = False):
+    """
+    Probes the LLM for a response to the user's message and handles the response, including code execution and tool calls.
+
+    Parameters
+    ----------
+    max_tokens : int, optional
+        The maximum number of tokens allowed in the LLM's response. Defaults to 500.
+    """
     global TOTAL_TOKENS  # Reference global token counter
     CONVO: Conversation = cl.user_session.get("CONVO")  # Get cached object
 
-    # Send user message immediately
-    user_message = cl.Message(content=CONVO.messages_[-1].content.text)
-    await user_message.send()
+    # Send user message immediately, if it's not sent from the user.
+    # No need to render it twice
+    if not from_user:
+        user_message = cl.Message(content=CONVO.messages_[-1].content.text)
+        await user_message.send()
 
     # Get response from LLM (streamed or not)
     response = CONVO.call_llm(max_tokens=max_tokens, stream=True)
 
-    # Handle streamed or non-streamed responses
-    if isinstance(response, str):  # Non-streamed response
+    if isinstance(response, str):
+        # Non-streamed response
         await CONVO.add_assistant_msg(msg=response)
-        assistant_message = cl.Message(content=response)
-        await assistant_message.send()  # Send assistant message
+        await cl.Message(content=response).send()
     else:  # Streamed response
         streaming_response = cl.Message(content="")
         await streaming_response.send()
+
         complete_response = ""
-        async for part in response:
+        async for part in response:  # Iterate over the async generator
             if part is not None:
-                if isinstance(part, dict) and "function_call" in part:
-                    await CONVO.process_tool_calls(part)
-                else:
-                    await streaming_response.stream_token(part)
-                    complete_response += part
-            else:
-                complete_response += "<$None$> "
+                if isinstance(part, Delta):
+                    if ("tool_calls" in part) and (part['tool_calls'] is not None):
+                        async for code_execution_message in CONVO.execute_tool_calls(part["tool_calls"]):
+                            if code_execution_message:  # the penultimate response contains the code, stdout, stderr
+                                await streaming_response.stream_token(code_execution_message)
+
+                    elif ("content" in part) and (part['content'] is not None):
+                        complete_response += part['content']
+                        await streaming_response.stream_token(part["content"])
+
+                    if complete_response != "":
+                        await CONVO.add_assistant_msg(msg=complete_response)
 
         # After the entire response is streamed
-        streaming_response.content = complete_response
-        await CONVO.add_assistant_msg(msg=complete_response)
+        # streaming_response.content = complete_response
+        # await CONVO.add_assistant_msg(msg=complete_response)
         await streaming_response.update()
 
-    # Cache the updated conversation
+    # Cache updated conversation
     cl.user_session.set("CONVO", CONVO)
 
     # Update and display token count (optional)
@@ -58,7 +74,7 @@ async def probe_llm(max_tokens: int = 500):
 @cl.on_chat_start
 async def on_chat_start():
     files = None
-    while files == None:
+    while files is None:
         files = await cl.AskFileMessage(
             content="Please upload python files only.",
             accept={
@@ -76,7 +92,7 @@ async def on_chat_start():
             formatted_code = f"### filename: {py_f.name} ###\n\n{code}\n\n###"
             all_code.append(formatted_code)
 
-    first_msg: cl.Message = await cl.AskUserMessage(
+    first_msg: cl.types.StepDict | None = await cl.AskUserMessage(
         content="What do you want to do with these uploaded files?",
         type="assistant_message",
         timeout=60,
@@ -92,7 +108,7 @@ async def on_chat_start():
         # Cache the updated conversation, before you probe_llm, cause async magic
         cl.user_session.set("CONVO", CONVO)
 
-        # Didn't know what to call this step, "probing" the LLM
+        # Didn't know what to call this step, "probing/inferring" the LLM
         # with a chat prompt seems the most logical.
         await probe_llm()
 
@@ -109,7 +125,7 @@ async def on_message(message: cl.Message):
     cl.user_session.set("CONVO", CONVO)
 
     # Probe llm
-    await probe_llm()
+    await probe_llm(from_user=True)
 
 
 if __name__ == "__main__":
