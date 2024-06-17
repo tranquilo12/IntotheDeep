@@ -1,3 +1,98 @@
+```python
+# app.py, run using `chainlit run app.py -w;`
+
+import chainlit as cl
+from dotenv import load_dotenv
+from utils import init_convo
+from oai_types import Conversation
+from models import ModelNames
+
+load_dotenv()
+
+
+async def probe_llm(convo: Conversation, max_tokens: int = 500):
+    # Instanciate empty message, for streaming into later
+    streaming_response = cl.Message(content="")
+    await streaming_response.send()
+
+    stream = convo.call_llm(stream=True, max_tokens=max_tokens)
+    complete_response = ""
+    async for part in stream:
+        await streaming_response.stream_token(part)
+        complete_response += part
+
+    # Update convo with assistant message, save it
+    streaming_response.content = convo.messages_[-1].content.text
+
+    # Cache this version of CONVO to memory
+    cl.user_session.set("CONVO", convo)
+
+    # Need an element that keeps track of the total tokens used.
+    elements = [cl.Text(name="Token Count", content=str(convo.total_tokens))]
+    streaming_response.elements = elements
+
+    await streaming_response.update()
+
+
+@cl.on_chat_start
+async def on_chat_start():
+    files = None
+    while files == None:
+        files = await cl.AskFileMessage(
+            content="Please upload python files only.",
+            accept={
+                "text/plain": [".txt", ".py", ".env", ".html", ".css", ".js", ".csv"]
+            },
+            max_size_mb=10,
+            timeout=240,
+            max_files=4,
+        ).send()
+
+    all_code = []
+    for py_f in files:
+        with open(py_f.path, "r", encoding="utf-8") as f:
+            code = f.read()
+            formatted_code = f"### filename: {py_f.name} ###\n\n{code}\n\n###"
+            all_code.append(formatted_code)
+
+    first_msg: cl.Message = await cl.AskUserMessage(
+        content="What do you want to do with these uploaded files?",
+        type="assistant_message",
+        timeout=60,
+    ).send()
+
+    if first_msg:
+        CONVO = init_convo(
+            context_code="\n\n".join(all_code),
+            user_question=first_msg["output"],
+            model_name=ModelNames.GPT_3_5_TURBO.value,
+            code_only=False,
+            efficient=False,
+            explain=False,
+        )
+
+        # Didn't know what to call this step, "probing" the LLM
+        # with a chat prompt seems the most logical.
+        await probe_llm(convo=CONVO)
+
+
+@cl.on_message
+async def on_message(message: cl.Message):
+    CONVO: Conversation = cl.user_session.get("CONVO")  # Get cached object
+    CONVO.add_user_msg(msg=message.content)  # ingest user message
+
+    # Probe llm
+    await probe_llm(convo=CONVO)
+
+
+if __name__ == "__main__":
+    from chainlit.cli import run_chainlit
+
+    run_chainlit(__file__)
+```
+
+```python
+# oai_types.py, for declaring types for usage
 import json
 import base64
 import tiktoken
@@ -7,7 +102,7 @@ from uuid import uuid4
 from litellm import acompletion
 from interpreter import execute_code_locally
 from pydantic import BaseModel, Field, computed_field
-from typing import List, Union, Dict, Literal, Optional, Callable, Any, AsyncIterator
+from typing import List, Union, Dict, Literal, Optional, Callable, Any
 
 
 #############################################
@@ -190,12 +285,12 @@ class Conversation(BaseModel):
 
     @computed_field(return_type=int)
     @property
-    def total_tokens(self) -> int:
+    def total_tokens(self):
         return sum(
             [msg.content.tokens(enc=self.token_encoding) for msg in self.messages_]
         )
 
-    def __request_payload__(self, max_tokens: int, stream: bool) -> Dict:
+    def __request_payload__(self, max_tokens: int, stream: bool):
         tool = ExecCodeLocallyTool()
         tool.add_parameter("code", CodeBlockParameter(), required=True)
         return {
@@ -208,13 +303,13 @@ class Conversation(BaseModel):
             "tool_choice": "auto",
         }
 
-    def update_system_message(self, msg: str) -> None:
+    def update_system_message(self, msg: str):
         self.messages_[0] = System(msg)
 
-    def append(self, message: Union[User, Assistant, System]) -> None:
+    def append(self, message: Union[User, Assistant, System]):
         self.messages_.append(message)
 
-    def add_user_msg(self, msg: str) -> None:
+    def add_user_msg(self, msg: str):
         self.append(User(msg=msg))
 
     async def add_assistant_msg(
@@ -246,7 +341,7 @@ class Conversation(BaseModel):
 
         self.append(assistant_message)  # Add the assistant message to the conversation
 
-    def del_message(self, index: int) -> None | IndexError:
+    def del_message(self, index: int):
         if 0 <= index < len(self.messages_):
             del self.messages_[index]
         else:
@@ -258,7 +353,7 @@ class Conversation(BaseModel):
             for message in self.messages_
         ]
 
-    async def process_tool_calls(self, message) -> AsyncIterator[Optional[str]]:
+    async def process_tool_calls(self, message):
         """
         Handles function calls received in the streamed LLM response, potentially in multiple chunks.
 
@@ -306,67 +401,25 @@ class Conversation(BaseModel):
 
     async def call_llm(self, max_tokens: int, stream: bool):
         """
-        Makes an asynchronous call to the Language Model (LLM) and handles both streaming and function calls.
+        Makes a call to the LLM, handling streaming and deferred function calls.
 
-        Parameters
-        ----------
-        max_tokens : int
-            The maximum number of tokens allowed in the LLM's response.
-        stream : bool
-            If True, the response will be streamed token by token; otherwise, it will be returned as a single response.
+        Args:
+            max_tokens: Maximum tokens for the LLM response.
+            stream: Whether the response should be streamed.
 
-        Yields
-        ------
-        str
-            If `stream` is True, yields each token of the response as it's generated.
-            If `stream` is False, yields the complete response as a single string.
-
-        Raises
-        ------
-        Exception
-            If there's an error during the LLM call or function execution.
-
-        Notes
-        -----
-        This method handles function calls within the LLM's response. If the LLM indicates a function call, this method will execute the specified function and incorporate its output into the response stream.
-
-        If `stream` is False and the response contains a function call, the function will be executed, and the final response (including function output) will be yielded.
+        Yields:
+            Tokens from the LLM response stream, or an empty string if waiting for function calls.
         """
         try:
             response = await acompletion(**self.__request_payload__(max_tokens, stream))
-
             if stream:
                 async for chunk in response:
-                    # Check for function calls in the streamed response
-                    if chunk.choices[0].finish_reason == "function_call":
-                        # Extract the function name and arguments
-                        function_call = chunk.choices[0].message.function_call
-                        function_name = function_call.name
-                        function_args = function_call.arguments
-
-                        # Start accumulating arguments if it's a new function call
-                        if function_name not in self.pending_function_calls:
-                            self.pending_function_calls[function_name] = ""
-
-                        # Accumulate arguments
-                        self.pending_function_calls[function_name] += function_args
-
-                        # Check if the function call is complete (arguments end with '}')
-                        if function_args.endswith("}"):
-                            args = self.pending_function_calls.pop(function_name)
-
-                            try:
-                                parsed_args = json.loads(args)
-                            except json.JSONDecodeError:
-                                print(f"Error parsing function arguments: {args}")
-                                parsed_args = {}  # Handle invalid JSON gracefully
-
-                            self.pending_function_calls_queue.append(
-                                (function_name, parsed_args)
-                            )
-                    else:
-                        # If it's not a function call, yield the content as before
-                        yield chunk.choices[0].delta.get("content", "")
+                    if token := chunk.choices[0].delta.content or "":
+                        yield token
+                    if "function_call" in chunk.choices[0].delta:
+                        m_ = chunk.choices[0].delta
+                        async for result in self.process_tool_calls(m_):
+                            yield result
 
             else:
                 first_response_message = response.choices[0].message
@@ -377,7 +430,7 @@ class Conversation(BaseModel):
                 function_to_call = self.available_functions[function_name]
                 function_response = await function_to_call(
                     code=function_args.get("code")
-                )  # Await async function
+                )  # Await asynmax_token function
 
                 stdout, stderr = function_response
                 await self.add_assistant_msg(
@@ -394,3 +447,39 @@ class Conversation(BaseModel):
         except Exception as e:
             logging.exception("Error in call_llm: %s", str(e))
             raise
+```python
+# interpreter.py 
+import json
+import aiohttp
+from typing import Tuple
+
+
+class Interpreter:
+    def __init__(self, endpoint: str):
+        self.endpoint = endpoint
+
+    async def run(self, code: str) -> Tuple[str, str]:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(self.endpoint, json={"code": code}) as response:
+                result = await response.text()
+                result = json.loads(result)
+                return result["stdout"], result["stderr"]
+
+
+async def execute_code_locally(code: str) -> Tuple[str, str]:
+    repl = Interpreter(endpoint="http://localhost:8888/execute")
+    output, error = await repl.run(code)
+    return output, error
+```
+
+I've provided you with some python code that's responsible for handling LLM interactions 
+and helps me execute code locally with a local python interpreter. 
+
+##### 
+Ok, now think about the flow of the conversation. Think about the situations below: 
+1. User uploads file, provides first comment and the response doesn't contain any function calling and is streaming.
+2. User uploads file, provides first comment and the response doesn't contain any function calling and is NOT streaming  
+3. User uploads file, provides first comment and the response contains function calling, and is streaming.
+4. User uploads file, provides first comment and the response contains function calling, and is NOT streaming. 
+
+Check for any inconsistencies in updating the main Conversation class when either of these flows takes place. 

@@ -145,10 +145,7 @@ def convert_to_pairs(input_list: List) -> List[List[str]]:
 
 
 def init_convo(
-    code_only: bool,
     model_name: str,
-    efficient: bool,
-    explain: bool,
     context_code: Union[str, Any],
     user_question: str,
 ) -> Conversation:
@@ -175,53 +172,32 @@ def init_convo(
     Conversation
         Starting conversation for the assistant
     """
-    system_message_base = ["You are #1 on the Stack Overflow community leaderboard. "]
-
-    if efficient:
-        efficient_message = "If you provide code, it should be the most algorithmically efficient solution possible. "
-        system_message_base.append(efficient_message)
-
-    if explain:
-        explain_message = "Tell the user that you're going to provide detailed explanations of the code. After every part explained, wait for the user's input before proceeding to the next part. "
-        system_message_base.append(explain_message)
-
-    if code_only:
-        code_only_message = "You have been trained to only reply with the code. You will be provided with some context code, and possibly an error message. You will do your best to determine the root cause of the problem and return the properly formatted solution. Add type hints and docstring (numpy format). Always surround your replies with '```python' and '```' tags so its markdown formatted. Always wrap the entire code around the main() function and call the main function at the end of the code."
-        system_message_base.append(code_only_message)
 
     # Append the system message with a list of rules that are common to both
-    system_message_base += [
+    system_message_base = "".join([
+        "You are #1 on the Stack Overflow community leaderboard. ",
         "Do not tell me that you're not capable of solving the problem. ",
         "You will figure a way out to solve the problem. ",
-    ]
-
-    # Now get the standard user message
-    if context_code is None:
-        context_code = "There is no code provided"
+        "If you're asked to generate code, do so within the '```python' '```' markdown tags, as they'll be extracted into a JSON structure.",
+    ])
 
     user_message_base = "\n\n".join(
         [
-            f"Here is the code I have so far, in between the <code></code> tags: ",
-            f"<code>{context_code}</code>",
+            f"Here is the code I have so far, in between the '```python' '```' tags: ",
+            f"```python\n{context_code if context_code is not None else "There is no code Provided"}\n```",
             "And here is my question about the code, in between the <question></question> tags: ",
-            f"<question>{user_question}</question>",
+            f"```text\n{user_question}\n```",
         ]
     )
 
-    # Get all the messages of the conversation
-    messages = [
-        System("".join(system_message_base)),
-        User(user_message_base),
-    ]
-
     # Create the conversation object
-    conversation = Conversation(
+    return Conversation(
         model_name=model_name,
-        messages_=messages,
-        functions=[ExecCodeLocallyTool().model_dump()],
+        messages_=[
+            System("".join(system_message_base)),
+            User(user_message_base),
+        ],
     )
-
-    return conversation
 
 
 async def call_llm(
