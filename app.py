@@ -1,6 +1,5 @@
 import chainlit as cl
 from dotenv import load_dotenv
-from litellm.utils import Delta
 
 from models import ModelNames
 from oai_types import Conversation
@@ -12,6 +11,21 @@ load_dotenv()
 TOTAL_TOKENS: int = 0
 
 
+@cl.action_callback("total_tokens")
+async def total_tokens_action(action: cl.Action):
+    """
+
+    Parameters
+    ----------
+    action : The variable, sent from the front end.
+
+    Returns
+    -------
+    None
+    """
+    await cl.Message(content=f"Executed {action.name}").send()
+
+
 async def probe_llm(max_tokens: int = 4000, from_user: bool = False):
     """
     Probes the LLM for a response to the user's message and handles the response, including code execution and tool calls.
@@ -19,10 +33,10 @@ async def probe_llm(max_tokens: int = 4000, from_user: bool = False):
     Parameters
     ----------
     max_tokens : int, optional
-        The maximum number of tokens allowed in the LLM's response. Defaults to 500.
+            The maximum number of tokens allowed in the LLM's response. Defaults to 500.
 
     from_user: bool, False
-        If the message has been initiated from the user, then we're just going to ignore sending a "user message"
+            If the message has been initiated from the user, then we're just going to ignore sending a "user message"
     """
     global TOTAL_TOKENS  # Reference global token counter
     CONVO: Conversation = cl.user_session.get("CONVO")  # Get cached object
@@ -36,8 +50,7 @@ async def probe_llm(max_tokens: int = 4000, from_user: bool = False):
     # Get response from LLM (streamed or not)
     response = CONVO.call_llm(max_tokens=max_tokens, stream=True)
 
-    if isinstance(response, str):
-        # Non-streamed response
+    if isinstance(response, str):  # Non-streamed response
         await CONVO.add_assistant_msg(msg=response)
         await cl.Message(content=response).send()
     else:  # Streamed response
@@ -46,34 +59,49 @@ async def probe_llm(max_tokens: int = 4000, from_user: bool = False):
 
         complete_response = ""
         async for part in response:  # Iterate over the async generator
-            if part is not None:
-                if isinstance(part, Delta):
-                    if ("tool_calls" in part) and (part['tool_calls'] is not None):
-                        async for code_execution_message in CONVO.execute_tool_calls(part["tool_calls"]):
-                            if code_execution_message:  # the penultimate response contains the code, stdout, stderr
-                                await streaming_response.stream_token(code_execution_message)
+            if part is None:
+                continue  # Skip any null values in the stream
 
-                    elif ("content" in part) and (part['content'] is not None):
-                        complete_response += part['content']
-                        await streaming_response.stream_token(part["content"])
+            # Check for tool_calls directly and iterate over them if present
+            if tool_calls := part.get("tool_calls"):
+                async for code_execution_message in CONVO.execute_tool_calls(
+                    tool_calls
+                ):
+                    if code_execution_message:
+                        await streaming_response.stream_token(code_execution_message)
 
-                    if complete_response != "":
-                        await CONVO.add_assistant_msg(msg=complete_response)
+            # Check for content and add it to the response
+            elif content := part.get("content"):
+                complete_response += content
+                await streaming_response.stream_token(content)
+
+            # Add to assistant message if any response was streamed so far
+            if complete_response != "":
+                await CONVO.add_assistant_msg(msg=complete_response)
 
         # After the entire response is streamed
+        # calculate the token count
+        TOTAL_TOKENS = CONVO.total_tokens
         await streaming_response.update()
 
     # Cache updated conversation
     cl.user_session.set("CONVO", CONVO)
 
     # Update and display token count (optional)
-    TOTAL_TOKENS = CONVO.total_tokens
     token_count_message = cl.Message(content=f"Total tokens used: {TOTAL_TOKENS}")
     await token_count_message.send()
 
 
 @cl.on_chat_start
 async def on_chat_start():
+    """
+    ALl things that happen, when you're about to start convo.
+
+    Returns
+    -------
+    None
+    """
+
     files = None
     while files is None:
         files = await cl.AskFileMessage(
@@ -100,7 +128,7 @@ async def on_chat_start():
     ).send()
 
     if first_msg:
-        CONVO = init_convo(
+        CONVO: Conversation = init_convo(
             context_code="\n\n".join(all_code),
             user_question=first_msg["output"],
             model_name=ModelNames.GPT_3_5_TURBO.value,
@@ -116,6 +144,17 @@ async def on_chat_start():
 
 @cl.on_message
 async def on_message(message: cl.Message):
+    """
+    What's going to happen AFTER you've started the convo, and will send a message now.
+
+    Parameters
+    ----------
+    message : cl.Message, Being received from the user.
+
+    Returns
+    -------
+    None
+    """
     # Get cached object
     CONVO: Conversation = cl.user_session.get("CONVO")
 
