@@ -1,5 +1,4 @@
 import json
-from typing import List
 
 import chainlit as cl
 from chainlit.input_widget import Select
@@ -62,9 +61,8 @@ async def run_conversation(max_tokens: int = 4000):
     CONVO: Conversation = cl.user_session.get("CONVO")
 
     while True:
-        TOTAL_TOKENS = CONVO.total_tokens
-        tokens_used = cl.Text(content=str(TOTAL_TOKENS), name="Tokens used")
-
+        BEFORE = CONVO.total_tokens
+        tokens_used = cl.Text(content=str(BEFORE), name="Tokens used")
         llm_response = CONVO.call_llm(max_tokens=max_tokens, stream=True)
 
         streaming_response = cl.Message(content="", elements=[tokens_used])
@@ -84,8 +82,12 @@ async def run_conversation(max_tokens: int = 4000):
                         content=TextContent(text=complete_str_resp)
                     )
 
-        await streaming_response.update()
         cl.user_session.set("CONVO", CONVO)
+
+        AFTER = CONVO.total_tokens
+        tokens_gen = cl.Text(content=str(AFTER - BEFORE), name="Tokens Generated")
+        streaming_response.elements = [tokens_used, tokens_gen]
+        await streaming_response.send()
         break
 
 
@@ -136,7 +138,8 @@ async def on_chat_start():
 
     if first_msg:
         CONVO: Conversation = init_convo(
-            context_code="\n\n".join(all_code),
+            # context_code="\n\n".join(all_code),
+            context_code="No code provided, ignore.",
             user_question=first_msg["output"],
             model_name=settings["Model"],
         )

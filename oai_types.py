@@ -53,13 +53,13 @@ class CodeExecutionContent(BaseModel):
     @property
     def text(self) -> str:
         """Generates formatted Markdown text for code and output."""
-        markdown_text = f"**Generated Code**\n---\n```python\n{self.code}\n```\n"
+        markdown_text = f"**Generated Code:**\n---\n```python\n{self.code} \n```\n\n"
 
         if self.stdout:
-            markdown_text += f"**Output:**\n---\n```stdout\n{self.stdout}\n```\n\n"
+            markdown_text += f"**Output:**\n---\n```stdout\n{self.stdout} \n``` \n\n"
 
         if self.stderr:
-            markdown_text += f"**Error:**\n---\n```stderr\n{self.stderr}\n```\n\n"
+            markdown_text += f"**Error:**\n---\n```stderr\n{self.stderr} \n``` \n\n"
 
         return markdown_text
 
