@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import json
 import logging
@@ -29,17 +28,16 @@ class Interpreter(BaseModel):
 
 
 async def execute_code_locally(code: str, interpreter: Interpreter):
-    """Executes Python code and yields CodeExecutionContent chunks."""
-    process = await asyncio.create_subprocess_shell(
-        f"{interpreter.endpoint} {code}",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    while True:
-        stdout_line = await process.stdout.readline()
-        if not stdout_line:
-            break
-        yield CodeExecutionContent(code=code, stdout=stdout_line.decode(), stderr="")
+    """Executes Python code using the Interpreter and yields CodeExecutionContent chunks."""
+    stdout, stderr = await interpreter.run(code)
+
+    # Split the stdout into lines and yield each line as a separate chunk
+    for line in stdout.splitlines():
+        yield CodeExecutionContent(code=code, stdout=line, stderr="")
+
+    # If there's any stderr, yield it as a final chunk
+    if stderr:
+        yield CodeExecutionContent(code=code, stdout="", stderr=stderr)
 
 
 #############################################
@@ -272,62 +270,59 @@ class Conversation(BaseModel):
         try:
             response = await acompletion(**self.__request_payload__(max_tokens, stream))
 
-            if stream:  # Obv for all streaming responses
-                # Logic has been divided into streaming for tool_call and not.
+            if stream:
+                current_tool_call = None
                 async for chunk in response:
-                    finish_reason = chunk.choices[0].finish_reason
                     delta = chunk.choices[0].delta
+                    finish_reason = chunk.choices[0].finish_reason
 
-                    # If nothing is received, keep the loop going!
+                    # If nothing is received, continue the loop
                     if delta is None:
                         continue
 
-                    # Deals with all tool calls
-                    if delta.tool_calls and len(delta.tool_calls) > 0:
+                    # Handle tool calls
+                    if delta.tool_calls:
                         tool_call_info = delta.tool_calls[0]
 
-                        if tool_call_info.function:
-                            tool_call_id = (  # Get or create the tool_call_id
-                                tool_call_info.id
-                                or self.active_tool_calls.get("current_tool_call_id")
+                        if current_tool_call is None:
+                            current_tool_call = FunctionCallContent(
+                                name=tool_call_info.function.name or "",
+                                arguments="",
+                                tool_call_id=tool_call_info.id,
                             )
 
-                            # Store initial function name and tool_call_id (if it's a new tool call)
-                            if tool_call_id not in self.active_tool_calls:
-                                if tool_call_info.function.name is None:
-                                    raise ValueError(
-                                        "Initial function name cannot be None"
-                                    )
-                                self.active_tool_calls[tool_call_id] = {
-                                    "name": tool_call_info.function.name,
-                                }
-                                # If it's a new tool call, also store the tool_call_id in "current_tool_call_id"
-                                self.active_tool_calls["current_tool_call_id"] = (
-                                    tool_call_id
-                                )
-
-                            tool_call = FunctionCallContent.model_validate(
-                                {
-                                    "name": self.active_tool_calls[tool_call_id][
-                                        "name"
-                                    ],
-                                    "arguments": tool_call_info.function.arguments,
-                                    "tool_call_id": tool_call_id,
-                                }
+                        if tool_call_info.function.arguments:
+                            current_tool_call.arguments += (
+                                tool_call_info.function.arguments
                             )
 
-                            yield tool_call, finish_reason
+                    # Handle regular content
+                    elif delta.content:
+                        yield delta.content, finish_reason
 
-                    # No tool call, just text, very simple.
-                    elif content := delta["content"]:
-                        yield content, finish_reason
+                    # Handle finish conditions
+                    if finish_reason == "tool_calls":
+                        if current_tool_call:
+                            yield current_tool_call, finish_reason
+                            current_tool_call = None
+                    elif finish_reason:
+                        if current_tool_call:
+                            yield current_tool_call, "tool_calls"
+                            current_tool_call = None
+                        else:
+                            yield None, finish_reason
 
             else:  # Non-streamed response
                 message = response.choices[0].message
-                if isinstance(message.content, FunctionCallContent):
-                    yield message.content
+                if message.tool_calls:
+                    tool_call = message.tool_calls[0]
+                    yield FunctionCallContent(
+                        name=tool_call.function.name,
+                        arguments=tool_call.function.arguments,
+                        tool_call_id=tool_call.id,
+                    ), "tool_calls"
                 else:
-                    yield message.content.text
+                    yield message.content, "stop"
 
         except Exception as e:
             logging.exception(f"Error in call_llm: {e}")

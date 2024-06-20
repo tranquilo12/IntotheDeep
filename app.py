@@ -24,80 +24,67 @@ TOTAL_TOKENS: int = 0
 #############################################
 ########## Helper Functions (Convo) #########
 #############################################
-@cl.step(type="tool", language="json")
+@cl.step(type="tool", show_input=True)
 async def call_tool(tool_call: FunctionCallContent, finish_reason: str):
     current_step = cl.context.current_step
     function_name = tool_call.name
     current_step.name = function_name
-    current_step.streaming = True
-    CONVO = cl.user_session.get("CONVO")
+    current_step.input = None
 
     # Accumulate arguments
     tool_call_id = tool_call.tool_call_id
     accumulated_args = cl.user_session.get(f"accumulated_args_{tool_call_id}", "")
     accumulated_args += tool_call.arguments
+    await current_step.stream_token(token=tool_call.arguments, is_input=True)
 
-    if finish_reason == "function_call":
+    CONVO = cl.user_session.get("CONVO")
+    if finish_reason == "tool_calls":
         cl.user_session.set(f"accumulated_args_{tool_call_id}", None)  # Clear arguments
         args = json.loads(accumulated_args)
 
-        # Execute the tool and stream results directly
+        # Execute the tool and stream results
         if function_name == "execute_code_locally":
-            current_step.input = accumulated_args
-            streaming_response = cl.Message(
-                content=""
-            )  # Create a message for streaming
-            await streaming_response.send()
-            final_response = ""
             async for result_chunk in execute_code_locally(
                 args["code"], CONVO.interpreter
             ):
                 if isinstance(result_chunk, CodeExecutionContent):
-                    await streaming_response.stream_token(result_chunk.text)
-                    final_response += result_chunk.text
-            await CONVO.add_assistant_msg(
-                content=CodeExecutionContent(text=final_response)
-            )  # Update conversation with final response
-            await streaming_response.send()  # Send the complete message
+                    current_step.output = result_chunk.text
+                    await CONVO.add_assistant_msg(content=result_chunk)
         else:
             raise NotImplementedError(f"Function {function_name} not implemented.")
+
+    await current_step.send()
 
 
 # noinspection PyArgumentList
 async def run_conversation(max_tokens: int = 4000):
-    """Probes the LLM for a response and handles it, including code execution."""
-    global TOTAL_TOKENS  # Keep track of total tokens
+    global TOTAL_TOKENS
     CONVO: Conversation = cl.user_session.get("CONVO")
 
     while True:
-        TOTAL_TOKENS = CONVO.total_tokens  # Update token count before the LLM call
+        TOTAL_TOKENS = CONVO.total_tokens
         tokens_used = cl.Text(content=str(TOTAL_TOKENS), name="Tokens used")
 
-        # Get the LLM's response (streamed or non-streamed)
         llm_response = CONVO.call_llm(max_tokens=max_tokens, stream=True)
-        if isinstance(llm_response, str):  # Handle non-streamed content
-            await CONVO.add_assistant_msg(TextContent(text=llm_response))
-            normal_response = cl.Message(content=llm_response, elements=[tokens_used])
-            await normal_response.send()
 
-        else:  # Handle the streaming response
-            streaming_response = cl.Message(content="", elements=[tokens_used])
-            await streaming_response.send()
+        streaming_response = cl.Message(content="", elements=[tokens_used])
+        await streaming_response.send()
 
-            final_response = ""
-            async for chunk, finish_reason in llm_response:
-                if isinstance(chunk, FunctionCallContent):  # Handling func calls
-                    await call_tool(chunk, finish_reason)
+        complete_str_resp = ""
+        async for chunk, finish_reason in llm_response:
+            if isinstance(chunk, FunctionCallContent):
+                await call_tool(chunk, finish_reason)
 
-                elif isinstance(chunk, str):  # Handle regular content
-                    await streaming_response.stream_token(chunk)
-                    final_response += chunk
+            elif isinstance(chunk, str):
+                await streaming_response.stream_token(chunk)
+                complete_str_resp += chunk
+
+                if finish_reason == "stop":
                     await CONVO.add_assistant_msg(
-                        content=TextContent(text=final_response)
+                        content=TextContent(text=complete_str_resp)
                     )
 
-            await streaming_response.send()
-
+        await streaming_response.update()
         cl.user_session.set("CONVO", CONVO)
         break
 
