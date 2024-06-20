@@ -1,0 +1,234 @@
+"""
+Just a small file to generate all types of prompts
+"""
+
+import subprocess
+from pathlib import Path
+
+from jinja2 import BaseLoader, Environment
+
+BASE_PATH = Path("/Users/shriramsunder/Projects/IntotheDeep")
+LIB_PATH = Path("")
+FILENAMES = [
+    BASE_PATH / ele for ele in ["app.py", "models.py", "oai_types.py", "utils.py"]
+]
+FILENAMES += [
+    Path(
+        "/Users/shriramsunder/Projects/IntotheDeep/.venv/lib/python3.12/site-packages/chainlit/step.py"
+    )
+]
+
+
+def get_starting_prompt(q: str) -> str:
+    """
+    A Function that returns a string for the all the files + task
+
+    Parameters
+    -------
+    q: str, The main question for this prompt
+    Returns
+    -------
+    str: All the files and the string for the task
+    """
+    # Create a jinja2 env with a string loader
+    env = Environment(loader=BaseLoader())
+
+    # Define the template
+    template = """
+You are a prominent python developer, with more than 100 years experience coding in python, and the chainlit library in python. 
+Use the code below to understand the problem and answer it to the best of your knowledge.
+Here is the reference documentation: ```https://docs.chainlit.io/concepts/step```
+
+{% for filename in filenames %}
+```python
+# filename: {{ filename }}
+{{ files[filename] }}
+```
+{% endfor %}
+
+I've provided you with all the code for my project that talks to an LLM and streams the 
+response back to a Chainlit frontend. All the code here is for showing off the streaming capabilities
+of this frontend. I'm also sticking with LiteLLM's API as it helps me integrate all types of LLM responses 
+neatly with OpenAI's API. 
+
+{{ q }}
+"""
+    files = {}
+    for filename in FILENAMES:
+        filepath = BASE_PATH / filename
+
+        with open(filepath, "r") as f:
+            files[filename] = f.read()
+
+    prompt = env.from_string(template).render(filenames=FILENAMES, files=files, q=q)
+    return prompt
+
+
+if __name__ == "__main__":
+    q = """
+The chunk.arguments contains STREAMING parts of the json that will eventually become something like 
+```json
+{
+    "code": "$SOME_PYTHON_CODE"
+}
+```
+
+Currently the "tool" cl.Step type in Chainlit supports streaming, but in it's current form the 
+results are not streaming properly yet. The code currently shows each "output streamed content" in a separate
+output element, not within the same element, resulting in all these elements stacking on top of each other causing a cluttered UI.
+
+Here is an example of this streaming implementation done correctly, use the below as the a reference to correct/update my code.
+First tell me what the problem is, and what you will change within each function/class.
+
+```python
+import json
+import ast
+import os
+from openai import AsyncOpenAI
+
+import chainlit as cl
+
+cl.instrument_openai()
+
+api_key = os.environ.get("OPENAI_API_KEY")
+client = AsyncOpenAI(api_key=api_key)
+
+MAX_ITER = 5
+
+
+def get_current_weather(location, unit):
+    unit = unit or "Fahrenheit"
+    weather_info = {
+        "location": location,
+        "temperature": "60",
+        "unit": unit,
+        "forecast": ["windy"],
+    }
+    return json.dumps(weather_info)
+
+
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_current_weather",
+            "description": "Get the current weather in a given location",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "The city and state, e.g. San Francisco, CA",
+                    },
+                    "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]},
+                },
+                "required": ["location"],
+            },
+        },
+    }
+]
+
+
+@cl.on_chat_start
+def start_chat():
+    cl.user_session.set(
+        "message_history",
+        [{"role": "system", "content": "You are a helpful assistant."}],
+    )
+
+
+@cl.step(type="tool")
+async def call_tool(tool_call_id, name, arguments, message_history):
+    arguments = ast.literal_eval(arguments)
+
+    current_step = cl.context.current_step
+    current_step.name = name
+    current_step.input = arguments
+
+    function_response = get_current_weather(
+        location=arguments.get("location"),
+        unit=arguments.get("unit"),
+    )
+
+    current_step.output = function_response
+    current_step.language = "json"
+
+    message_history.append(
+        {
+            "role": "function",
+            "name": name,
+            "content": function_response,
+            "tool_call_id": tool_call_id,
+        }
+    )
+
+async def call_gpt4(message_history):
+    settings = {
+        "model": "gpt-3.5-turbo",
+        "tools": tools,
+        "tool_choice": "auto",
+        "temperature": 0,
+    }
+
+    stream = await client.chat.completions.create(
+        messages=message_history, stream=True, **settings
+    )
+
+    tool_call_id = None
+    function_output = {"name": "", "arguments": ""}
+
+    final_answer = cl.Message(content="", author="Answer")
+
+    async for part in stream:
+        new_delta = part.choices[0].delta
+        tool_call = new_delta.tool_calls and new_delta.tool_calls[0]
+        function = tool_call and tool_call.function
+        if tool_call and tool_call.id:
+            tool_call_id = tool_call.id
+
+        if function:
+            if function.name:
+                function_output["name"] = function.name
+            else:
+                function_output["arguments"] += function.arguments
+        if new_delta.content:
+            if not final_answer.content:
+                await final_answer.send()
+            await final_answer.stream_token(new_delta.content)
+
+    if tool_call_id:
+        await call_tool(
+            tool_call_id,
+            function_output["name"],
+            function_output["arguments"],
+            message_history,
+        )
+
+    if final_answer.content:
+        await final_answer.update()
+
+    return tool_call_id
+
+
+@cl.on_message
+async def on_message(message: cl.Message):
+    message_history = cl.user_session.get("message_history")
+    message_history.append({"role": "user", "content": message.content})
+
+    cur_iter = 0
+
+    while cur_iter < MAX_ITER:
+        tool_call_id = await call_gpt4(message_history)
+        if not tool_call_id:
+            break
+
+        cur_iter += 1
+```
+"""
+    result = get_starting_prompt(q=q)
+
+    process = subprocess.Popen(
+        "pbcopy", env={"LANG": "en_US.UTF-8"}, stdin=subprocess.PIPE
+    )
+    process.communicate(result.encode("UTF-8"))
+    print("copied to clipboard!")

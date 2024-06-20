@@ -1,8 +1,17 @@
+import json
+
 import chainlit as cl
+from chainlit.input_widget import Select
 from dotenv import load_dotenv
 
 from models import ModelNames
-from oai_types import Conversation
+from oai_types import (
+    CodeExecutionContent,
+    Conversation,
+    FunctionCallContent,
+    TextContent,
+    execute_code_locally,
+)
 from utils import init_convo
 
 load_dotenv()
@@ -11,85 +20,75 @@ load_dotenv()
 TOTAL_TOKENS: int = 0
 
 
-@cl.action_callback("total_tokens")
-async def total_tokens_action(action: cl.Action):
-    """
+#############################################
+########## Helper Functions (Convo) #########
+#############################################
+@cl.step(type="tool", show_input=True)
+async def call_tool(tool_call: FunctionCallContent, finish_reason: str):
+    current_step = cl.context.current_step
+    function_name = tool_call.name
+    current_step.name = function_name
+    current_step.input = None
 
-    Parameters
-    ----------
-    action : The variable, sent from the front end.
+    # Accumulate arguments
+    tool_call_id = tool_call.tool_call_id
+    accumulated_args = cl.user_session.get(f"accumulated_args_{tool_call_id}", "")
+    accumulated_args += tool_call.arguments
+    await current_step.stream_token(token=tool_call.arguments, is_input=True)
 
-    Returns
-    -------
-    None
-    """
-    await cl.Message(content=f"Executed {action.name}").send()
+    CONVO = cl.user_session.get("CONVO")
+    if finish_reason == "tool_calls":
+        cl.user_session.set(f"accumulated_args_{tool_call_id}", None)  # Clear arguments
+        args = json.loads(accumulated_args)
+
+        # Execute the tool and stream results
+        if function_name == "execute_code_locally":
+            async for result_chunk in execute_code_locally(
+                args["code"], CONVO.interpreter
+            ):
+                if isinstance(result_chunk, CodeExecutionContent):
+                    current_step.output = result_chunk.text
+                    await CONVO.add_assistant_msg(content=result_chunk)
+        else:
+            raise NotImplementedError(f"Function {function_name} not implemented.")
+
+    await current_step.send()
 
 
-async def probe_llm(max_tokens: int = 4000, from_user: bool = False):
-    """
-    Probes the LLM for a response to the user's message and handles the response, including code execution and tool calls.
+# noinspection PyArgumentList
+async def run_conversation(max_tokens: int = 4000):
+    global TOTAL_TOKENS
+    CONVO: Conversation = cl.user_session.get("CONVO")
 
-    Parameters
-    ----------
-    max_tokens : int, optional
-            The maximum number of tokens allowed in the LLM's response. Defaults to 500.
+    while True:
+        BEFORE = CONVO.total_tokens
+        tokens_used = cl.Text(content=str(BEFORE), name="Tokens used")
+        llm_response = CONVO.call_llm(max_tokens=max_tokens, stream=True)
 
-    from_user: bool, False
-            If the message has been initiated from the user, then we're just going to ignore sending a "user message"
-    """
-    global TOTAL_TOKENS  # Reference global token counter
-    CONVO: Conversation = cl.user_session.get("CONVO")  # Get cached object
-
-    # Send user message immediately, if it's not sent from the user.
-    # No need to render it twice
-    if not from_user:
-        user_message = cl.Message(content=CONVO.messages_[-1].content.text)
-        await user_message.send()
-
-    # Get response from LLM (streamed or not)
-    response = CONVO.call_llm(max_tokens=max_tokens, stream=True)
-
-    if isinstance(response, str):  # Non-streamed response
-        await CONVO.add_assistant_msg(msg=response)
-        await cl.Message(content=response).send()
-    else:  # Streamed response
-        streaming_response = cl.Message(content="")
+        streaming_response = cl.Message(content="", elements=[tokens_used])
         await streaming_response.send()
 
-        complete_response = ""
-        async for part in response:  # Iterate over the async generator
-            if part is None:
-                continue  # Skip any null values in the stream
+        complete_str_resp = ""
+        async for chunk, finish_reason in llm_response:
+            if isinstance(chunk, FunctionCallContent):
+                await call_tool(chunk, finish_reason)
 
-            # Check for tool_calls directly and iterate over them if present
-            if tool_calls := part.get("tool_calls"):
-                async for code_execution_message in CONVO.execute_tool_calls(
-                    tool_calls
-                ):
-                    if code_execution_message:
-                        await streaming_response.stream_token(code_execution_message)
+            elif isinstance(chunk, str):
+                await streaming_response.stream_token(chunk)
+                complete_str_resp += chunk
 
-            # Check for content and add it to the response
-            elif content := part.get("content"):
-                complete_response += content
-                await streaming_response.stream_token(content)
+                if finish_reason == "stop":
+                    await CONVO.add_assistant_msg(
+                        content=TextContent(text=complete_str_resp)
+                    )
 
-            # Add to assistant message if any response was streamed so far
-            if complete_response != "":
-                await CONVO.add_assistant_msg(msg=complete_response)
+        cl.user_session.set("CONVO", CONVO)
 
-        # After the entire response is streamed
-        # calculate the token count
-        TOTAL_TOKENS = CONVO.total_tokens
-        await streaming_response.update()
-
-    # Cache updated conversation
-    cl.user_session.set("CONVO", CONVO)
-
-    # Update and display token count (optional)
-    token_count_message = cl.Message(content=f"Total tokens used: {TOTAL_TOKENS}")
-    await token_count_message.send()
+        AFTER = CONVO.total_tokens
+        tokens_gen = cl.Text(content=str(AFTER - BEFORE), name="Tokens Generated")
+        streaming_response.elements = [tokens_used, tokens_gen]
+        await streaming_response.send()
+        break
 
 
 @cl.on_chat_start
@@ -101,10 +100,20 @@ async def on_chat_start():
     -------
     None
     """
+    settings = await cl.ChatSettings(
+        [
+            Select(
+                id="Model",
+                label="OpenAI - Model",
+                values=ModelNames.all_to_list(),
+                initial_value=ModelNames.GPT_3_5_TURBO.value,
+            ),
+        ]
+    ).send()
 
     files = None
     while files is None:
-        files = await cl.AskFileMessage(
+        files: List[cl.types.AskFileResponse] | None = await cl.AskFileMessage(
             content="Please upload python files only.",
             accept={
                 "text/plain": [".txt", ".py", ".env", ".html", ".css", ".js", ".csv"]
@@ -129,17 +138,29 @@ async def on_chat_start():
 
     if first_msg:
         CONVO: Conversation = init_convo(
-            context_code="\n\n".join(all_code),
+            # context_code="\n\n".join(all_code),
+            context_code="No code provided, ignore.",
             user_question=first_msg["output"],
-            model_name=ModelNames.GPT_3_5_TURBO.value,
+            model_name=settings["Model"],
         )
 
         # Cache the updated conversation, before you probe_llm, cause async magic
         cl.user_session.set("CONVO", CONVO)
 
-        # Didn't know what to call this step, "probing/inferring" the LLM
-        # with a chat prompt seems the most logical.
-        await probe_llm()
+        # Let's goooo
+        await run_conversation()
+
+
+@cl.on_settings_update
+async def on_settings_update(settings):
+    # Get cached object
+    CONVO: Conversation = cl.user_session.get("CONVO")
+
+    # Update the conversation's model name
+    CONVO.model_name = settings["Model"]
+
+    # Cache the updated conversation, before you probe_llm, cause async magic
+    cl.user_session.set("CONVO", CONVO)
 
 
 @cl.on_message
@@ -165,7 +186,7 @@ async def on_message(message: cl.Message):
     cl.user_session.set("CONVO", CONVO)
 
     # Probe llm
-    await probe_llm(from_user=True)
+    await run_conversation()
 
 
 if __name__ == "__main__":
