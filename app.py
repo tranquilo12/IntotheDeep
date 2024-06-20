@@ -1,6 +1,8 @@
 import json
+from typing import List
 
 import chainlit as cl
+from chainlit.input_widget import Select
 from dotenv import load_dotenv
 
 from models import ModelNames
@@ -19,51 +21,49 @@ load_dotenv()
 TOTAL_TOKENS: int = 0
 
 
-@cl.step(type="tool")
-async def tool_call(tool_call: FunctionCallContent):
-    """Executes the tool call after accumulating all arguments."""
+#############################################
+########## Helper Functions (Convo) #########
+#############################################
+@cl.step(type="tool", language="json")
+async def call_tool(tool_call: FunctionCallContent, finish_reason: str):
+    current_step = cl.context.current_step
+    function_name = tool_call.name
+    current_step.name = function_name
+    current_step.streaming = True
+    CONVO = cl.user_session.get("CONVO")
 
-    tool_call_id = (
-        tool_call.tool_call_id
-    )  # Get the unique identifier for this tool call
-    function_name = tool_call.name  # Get the name of the function to be called
-
-    # Retrieve any previously accumulated arguments for this tool call from the user session
+    # Accumulate arguments
+    tool_call_id = tool_call.tool_call_id
     accumulated_args = cl.user_session.get(f"accumulated_args_{tool_call_id}", "")
-
-    # Add the new chunk of arguments to the accumulated arguments
     accumulated_args += tool_call.arguments
 
-    # Store the updated accumulated arguments back into the user session
-    cl.user_session.set(f"accumulated_args_{tool_call_id}", accumulated_args)
-
-    # Try to parse the accumulated arguments as a JSON object
-    try:
+    if finish_reason == "function_call":
+        cl.user_session.set(f"accumulated_args_{tool_call_id}", None)  # Clear arguments
         args = json.loads(accumulated_args)
-    except json.JSONDecodeError:
-        # If the arguments are not yet a valid JSON object, return (wait for more chunks)
-        return
 
-    # If the arguments are a valid JSON object, delete the accumulated arguments from the user session
-    cl.user_session.set(f"accumulated_args_{tool_call_id}", None)
+        # Execute the tool and stream results directly
+        if function_name == "execute_code_locally":
+            current_step.input = accumulated_args
+            streaming_response = cl.Message(
+                content=""
+            )  # Create a message for streaming
+            await streaming_response.send()
+            final_response = ""
+            async for result_chunk in execute_code_locally(
+                args["code"], CONVO.interpreter
+            ):
+                if isinstance(result_chunk, CodeExecutionContent):
+                    await streaming_response.stream_token(result_chunk.text)
+                    final_response += result_chunk.text
+            await CONVO.add_assistant_msg(
+                content=CodeExecutionContent(text=final_response)
+            )  # Update conversation with final response
+            await streaming_response.send()  # Send the complete message
+        else:
+            raise NotImplementedError(f"Function {function_name} not implemented.")
 
-    # Execute the specific tool based on its name
-    if function_name == "execute_code_locally":
-        # If the function is to execute code locally, extract the code from the arguments
-        code = args["code"]
-        # Get the current conversation from the user session
-        CONVO: Conversation = cl.user_session.get("CONVO")
-        # Execute the code locally and get the result
-        result: CodeExecutionContent = await execute_code_locally(
-            code, CONVO.interpreter
-        )
-        # Yield the result (send it back to the main loop for further processing/display)
-        return result
-    else:
-        # If the function name is not recognized, raise an error
-        raise NotImplementedError(f"Function {function_name} not implemented.")
 
-
+# noinspection PyArgumentList
 async def run_conversation(max_tokens: int = 4000):
     """Probes the LLM for a response and handles it, including code execution."""
     global TOTAL_TOKENS  # Keep track of total tokens
@@ -71,28 +71,33 @@ async def run_conversation(max_tokens: int = 4000):
 
     while True:
         TOTAL_TOKENS = CONVO.total_tokens  # Update token count before the LLM call
-        token_count_message = cl.Message(content=f"Total tokens used: {TOTAL_TOKENS}")
-        await token_count_message.send()
+        tokens_used = cl.Text(content=str(TOTAL_TOKENS), name="Tokens used")
 
         # Get the LLM's response (streamed or non-streamed)
-        response = CONVO.call_llm(max_tokens=max_tokens, stream=True)
-        if isinstance(response, str):  # Handle non-streamed content
-            await CONVO.add_assistant_msg(TextContent(text=response))
-            normal_response = cl.Message(content=response)
+        llm_response = CONVO.call_llm(max_tokens=max_tokens, stream=True)
+        if isinstance(llm_response, str):  # Handle non-streamed content
+            await CONVO.add_assistant_msg(TextContent(text=llm_response))
+            normal_response = cl.Message(content=llm_response, elements=[tokens_used])
             await normal_response.send()
+
         else:  # Handle the streaming response
-            streaming_response = cl.Message(content="")
+            streaming_response = cl.Message(content="", elements=[tokens_used])
             await streaming_response.send()
-            async for chunk in response:
-                if isinstance(chunk, FunctionCallContent):
-                    msg = await tool_call(chunk)  # Await the final result
-                    if msg:  # Check if the tool call is complete
-                        await CONVO.add_assistant_msg(content=msg)
-                        await streaming_response.stream_token(msg.text)
-                elif content := chunk.get("content"):  # Handle regular content
-                    await CONVO.add_assistant_msg(content=content)
-                    await streaming_response.stream_token(content)
-            await streaming_response.update()
+
+            final_response = ""
+            async for chunk, finish_reason in llm_response:
+                if isinstance(chunk, FunctionCallContent):  # Handling func calls
+                    await call_tool(chunk, finish_reason)
+
+                elif isinstance(chunk, str):  # Handle regular content
+                    await streaming_response.stream_token(chunk)
+                    final_response += chunk
+                    await CONVO.add_assistant_msg(
+                        content=TextContent(text=final_response)
+                    )
+
+            await streaming_response.send()
+
         cl.user_session.set("CONVO", CONVO)
         break
 
@@ -106,10 +111,20 @@ async def on_chat_start():
     -------
     None
     """
+    settings = await cl.ChatSettings(
+        [
+            Select(
+                id="Model",
+                label="OpenAI - Model",
+                values=ModelNames.all_to_list(),
+                initial_value=ModelNames.GPT_3_5_TURBO.value,
+            ),
+        ]
+    ).send()
 
     files = None
     while files is None:
-        files = await cl.AskFileMessage(
+        files: List[cl.types.AskFileResponse] | None = await cl.AskFileMessage(
             content="Please upload python files only.",
             accept={
                 "text/plain": [".txt", ".py", ".env", ".html", ".css", ".js", ".csv"]
@@ -136,7 +151,7 @@ async def on_chat_start():
         CONVO: Conversation = init_convo(
             context_code="\n\n".join(all_code),
             user_question=first_msg["output"],
-            model_name=ModelNames.GPT_3_5_TURBO.value,
+            model_name=settings["Model"],
         )
 
         # Cache the updated conversation, before you probe_llm, cause async magic
@@ -144,6 +159,18 @@ async def on_chat_start():
 
         # Let's goooo
         await run_conversation()
+
+
+@cl.on_settings_update
+async def on_settings_update(settings):
+    # Get cached object
+    CONVO: Conversation = cl.user_session.get("CONVO")
+
+    # Update the conversation's model name
+    CONVO.model_name = settings["Model"]
+
+    # Cache the updated conversation, before you probe_llm, cause async magic
+    cl.user_session.set("CONVO", CONVO)
 
 
 @cl.on_message

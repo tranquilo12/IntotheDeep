@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import logging
@@ -10,6 +11,9 @@ from litellm import acompletion
 from pydantic import BaseModel, Field, computed_field
 
 
+#############################################
+########## Interpreter related ##############
+#############################################
 class Interpreter(BaseModel):
     endpoint: str = Field(default="http://localhost:8888/execute")
 
@@ -24,17 +28,18 @@ class Interpreter(BaseModel):
                 return result["stdout"], result["stderr"]
 
 
-async def execute_code_locally(
-    code: str, interpreter: Interpreter
-) -> "CodeExecutionContent":
-    """Executes Python code using your Interpreter class and returns a CodeExecutionContent object."""
-    try:
-        stdout, stderr = await interpreter.run(code)
-    except Exception as e:
-        logging.error(f"Error executing code: {e}")
-        return CodeExecutionContent(code=code, stdout="", stderr=f"Error: {e}")
-    else:
-        return CodeExecutionContent(code=code, stdout=stdout, stderr=stderr)
+async def execute_code_locally(code: str, interpreter: Interpreter):
+    """Executes Python code and yields CodeExecutionContent chunks."""
+    process = await asyncio.create_subprocess_shell(
+        f"{interpreter.endpoint} {code}",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    while True:
+        stdout_line = await process.stdout.readline()
+        if not stdout_line:
+            break
+        yield CodeExecutionContent(code=code, stdout=stdout_line.decode(), stderr="")
 
 
 #############################################
@@ -267,13 +272,17 @@ class Conversation(BaseModel):
         try:
             response = await acompletion(**self.__request_payload__(max_tokens, stream))
 
-            if stream:
+            if stream:  # Obv for all streaming responses
+                # Logic has been divided into streaming for tool_call and not.
                 async for chunk in response:
+                    finish_reason = chunk.choices[0].finish_reason
                     delta = chunk.choices[0].delta
 
+                    # If nothing is received, keep the loop going!
                     if delta is None:
                         continue
 
+                    # Deals with all tool calls
                     if delta.tool_calls and len(delta.tool_calls) > 0:
                         tool_call_info = delta.tool_calls[0]
 
@@ -307,11 +316,11 @@ class Conversation(BaseModel):
                                 }
                             )
 
-                            yield tool_call
+                            yield tool_call, finish_reason
 
-                        elif "content" in delta:
-                            content = delta["content"]
-                            yield content
+                    # No tool call, just text, very simple.
+                    elif content := delta["content"]:
+                        yield content, finish_reason
 
             else:  # Non-streamed response
                 message = response.choices[0].message
