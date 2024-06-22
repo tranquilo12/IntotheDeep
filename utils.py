@@ -154,7 +154,7 @@ def init_convo(
 	return Conversation(
 		model_name=model_name,
 		messages_=[
-			System("".join(system_message_base)),
+			System(system_message_base),
 			User(user_message_base),
 		],
 	)
