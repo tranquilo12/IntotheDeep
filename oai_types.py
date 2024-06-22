@@ -9,6 +9,8 @@ import tiktoken
 from litellm import acompletion
 from pydantic import BaseModel, Field, computed_field
 
+from models import ModelNames
+
 
 #############################################
 ########## Interpreter related ##############
@@ -177,7 +179,7 @@ class System(BaseModel):
 #############################################
 class Conversation(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
-    model_name: str
+    model: str = Field(default=ModelNames.GPT_3_5_TURBO.value)
     accumulated_arguments: Dict = Field(default={})
     active_tool_calls: Dict = Field(default={})
     messages_: List[Union[User, Assistant, System]] = Field(default_factory=list)
@@ -185,9 +187,9 @@ class Conversation(BaseModel):
 
     @property
     def encoding(self) -> tiktoken.Encoding:
-        if self.model_name is not None:
-            if "gpt" in self.model_name.lower():
-                return tiktoken.encoding_for_model(self.model_name)
+        if self.model is not None:
+            if "gpt" in self.model.lower():
+                return tiktoken.encoding_for_model(self.model)
 
     @property
     def total_tokens(self) -> int:
@@ -196,6 +198,9 @@ class Conversation(BaseModel):
     @property
     def messages(self):
         return self.messages_
+
+    def __append__(self, message: Union[User, Assistant, System]) -> None:
+        self.messages_.append(message)
 
     def __to_dict__(self) -> List[dict]:
         return [
@@ -229,7 +234,7 @@ class Conversation(BaseModel):
             },
         }
         return {
-            "model": self.model_name,
+            "model": self.model,
             "temperature": 0.3,
             "messages": self.__to_dict__(),
             "stream": stream,
@@ -239,7 +244,7 @@ class Conversation(BaseModel):
         }
 
     def add_user_msg(self, msg: str) -> None:
-        self.append(User(msg=msg))
+        self.__append__(User(msg=msg))
 
     async def add_assistant_msg(
         self,
@@ -249,19 +254,17 @@ class Conversation(BaseModel):
         """
         Adds an assistant message to the conversation with flexible content types.
 
-        Args:
-                        content: The content of the assistant's message. Can be TextContent, CodeExecutionContent, or FunctionCallContent.
-                        **kwargs: Additional keyword arguments to pass to the Assistant constructor (e.g., name, tool_call_id).
+        Parameters:
+        -----------
+        content: The content of the assistant's message. Can be TextContent, CodeExecutionContent, or FunctionCallContent.
+        **kwargs: Additional keyword arguments to pass to the Assistant constructor (e.g., name, tool_call_id).
         """
 
         if content is None:
             raise ValueError("Content must be provided.")
 
         assistant_message = Assistant(content=content, **kwargs)
-        self.append(assistant_message)
-
-    def append(self, message: Union[User, Assistant, System]) -> None:
-        self.messages_.append(message)
+        self.__append__(assistant_message)
 
     async def call_llm(self, max_tokens: int, stream: bool = False):
         """Calls the LLM, handles responses, and manages tool calls."""

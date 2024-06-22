@@ -183,7 +183,7 @@ async def on_settings_update(settings: Dict):
     CONVO: Conversation = cl.user_session.get("CONVO")
 
     # Update the conversation's model name
-    CONVO.model_name = settings["Model"]
+    CONVO.model = settings["Model"]
 
     # Cache the updated conversation, before you probe_llm, cause async magic
     cl.user_session.set("CONVO", CONVO)
