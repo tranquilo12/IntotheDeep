@@ -1,4 +1,9 @@
+"""
+Something cool here
+"""
+
 import json
+from typing import Dict
 
 import chainlit as cl
 from chainlit.input_widget import Select
@@ -25,6 +30,14 @@ TOTAL_TOKENS: int = 0
 #############################################
 @cl.step(type="tool", show_input=True)
 async def call_tool(tool_call: FunctionCallContent, finish_reason: str):
+    """
+    Just for calling tools...
+
+    Parameters
+    ----------
+    tool_call : FunctionCallContent, The content from the
+    finish_reason : str,
+    """
     current_step = cl.context.current_step
     function_name = tool_call.name
     current_step.name = function_name
@@ -57,6 +70,13 @@ async def call_tool(tool_call: FunctionCallContent, finish_reason: str):
 
 # noinspection PyArgumentList
 async def run_conversation(max_tokens: int = 4000):
+    """
+    Run the convo! Send to the LLM!
+
+    Parameters
+    ----------
+    max_tokens : int, It's always the max.
+    """
     global TOTAL_TOKENS
     CONVO: Conversation = cl.user_session.get("CONVO")
 
@@ -77,17 +97,16 @@ async def run_conversation(max_tokens: int = 4000):
                 await streaming_response.stream_token(chunk)
                 complete_str_resp += chunk
 
-                if finish_reason == "stop":
-                    await CONVO.add_assistant_msg(
-                        content=TextContent(text=complete_str_resp)
-                    )
+                if finish_reason is not None:
+                    content = TextContent(text=complete_str_resp)
+                    await CONVO.add_assistant_msg(content=content)
 
         cl.user_session.set("CONVO", CONVO)
 
         AFTER = CONVO.total_tokens
         tokens_gen = cl.Text(content=str(AFTER - BEFORE), name="Tokens Generated")
         streaming_response.elements = [tokens_used, tokens_gen]
-        await streaming_response.send()
+        await streaming_response.update()
         break
 
 
@@ -111,24 +130,24 @@ async def on_chat_start():
         ]
     ).send()
 
-    files = None
-    while files is None:
-        files: List[cl.types.AskFileResponse] | None = await cl.AskFileMessage(
-            content="Please upload python files only.",
-            accept={
-                "text/plain": [".txt", ".py", ".env", ".html", ".css", ".js", ".csv"]
-            },
-            max_size_mb=10,
-            timeout=240,
-            max_files=4,
-        ).send()
-
-    all_code = []
-    for py_f in files:
-        with open(py_f.path, "r", encoding="utf-8") as f:
-            code = f.read()
-            formatted_code = f"### filename: {py_f.name} ###\n\n{code}\n\n###"
-            all_code.append(formatted_code)
+    # files = None
+    # while files is None:
+    #     files: List[cl.types.AskFileResponse] | None = await cl.AskFileMessage(
+    #         content="Please upload python files only.",
+    #         accept={
+    #             "text/plain": [".txt", ".py", ".env", ".html", ".css", ".js", ".csv"]
+    #         },
+    #         max_size_mb=10,
+    #         timeout=240,
+    #         max_files=4,
+    #     ).send()
+    #
+    # all_code = []
+    # for py_f in files:
+    #     with open(py_f.path, "r", encoding="utf-8") as f:
+    #         code = f.read()
+    #         formatted_code = f"### filename: {py_f.name} ###\n\n{code}\n\n###"
+    #         all_code.append(formatted_code)
 
     first_msg: cl.types.StepDict | None = await cl.AskUserMessage(
         content="What do you want to do with these uploaded files?",
@@ -152,7 +171,14 @@ async def on_chat_start():
 
 
 @cl.on_settings_update
-async def on_settings_update(settings):
+async def on_settings_update(settings: Dict):
+    """
+    For all settings update
+
+    Parameters
+    ----------
+    settings : Dict
+    """
     # Get cached object
     CONVO: Conversation = cl.user_session.get("CONVO")
 
