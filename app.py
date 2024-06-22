@@ -42,6 +42,7 @@ async def call_tool(tool_call: FunctionCallContent, finish_reason: str):
     function_name = tool_call.name
     current_step.name = function_name
     current_step.input = None
+    # current_step.language = "json"
 
     # Accumulate arguments
     tool_call_id = tool_call.tool_call_id
@@ -52,7 +53,12 @@ async def call_tool(tool_call: FunctionCallContent, finish_reason: str):
     CONVO = cl.user_session.get("CONVO")
     if finish_reason == "tool_calls":
         cl.user_session.set(f"accumulated_args_{tool_call_id}", None)  # Clear arguments
-        args = json.loads(accumulated_args)
+        try:
+            args = json.loads(accumulated_args)
+        except json.decoder.JSONDecodeError as _:
+            # check if there's ```python tags and then execute the code.
+            code = accumulated_args.lstrip("```python").rstrip("```")
+            args = {"code": code}
 
         # Execute the tool and stream results
         if function_name == "execute_code_locally":
