@@ -6,7 +6,6 @@ import json
 from typing import Dict
 
 import chainlit as cl
-from chainlit.input_widget import Select
 from dotenv import load_dotenv
 
 from models import ModelNames
@@ -28,7 +27,7 @@ TOTAL_TOKENS: int = 0
 #############################################
 ########## Helper Functions (Convo) #########
 #############################################
-@cl.step(type="tool", show_input=True)
+@cl.step(type="tool", show_input=False)
 async def call_tool(tool_call: FunctionCallContent, finish_reason: str):
     """
     Just for calling tools...
@@ -119,60 +118,41 @@ async def run_conversation(max_tokens: int = 4000):
 @cl.on_chat_start
 async def on_chat_start():
     """
-    ALl things that happen, when you're about to start convo.
-
-    Returns
-    -------
-    None
+    All things that happen when you're about to start convo.
     """
-    settings = await cl.ChatSettings(
-        [
-            Select(
-                id="Model",
-                label="OpenAI - Model",
-                values=ModelNames.all_to_list(),
-                initial_value=ModelNames.GPT_3_5_TURBO.value,
-            ),
-        ]
+    # Ask the user to select a model before initializing the conversation
+    model_selection = await cl.AskActionMessage(
+        content="Please select a model to use for this conversation:",
+        actions=[
+            cl.Action(name="model", value=model.value, label=model.value)
+            for model in ModelNames
+        ],
     ).send()
 
-    # files = None
-    # while files is None:
-    #     files: List[cl.types.AskFileResponse] | None = await cl.AskFileMessage(
-    #         content="Please upload python files only.",
-    #         accept={
-    #             "text/plain": [".txt", ".py", ".env", ".html", ".css", ".js", ".csv"]
-    #         },
-    #         max_size_mb=10,
-    #         timeout=240,
-    #         max_files=4,
-    #     ).send()
-    #
-    # all_code = []
-    # for py_f in files:
-    #     with open(py_f.path, "r", encoding="utf-8") as f:
-    #         code = f.read()
-    #         formatted_code = f"### filename: {py_f.name} ###\n\n{code}\n\n###"
-    #         all_code.append(formatted_code)
+    if model_selection is None:
+        await cl.Message(content="No model selected. Using default model.").send()
+        selected_model = ModelNames.GPT_3_5_TURBO.value
+    else:
+        selected_model = model_selection["value"]
 
+    # Now we can use the selected model when initializing the conversation
     first_msg: cl.types.StepDict | None = await cl.AskUserMessage(
-        content="What do you want to do with these uploaded files?",
+        content="What do you want to do?",
         type="assistant_message",
         timeout=60,
     ).send()
 
     if first_msg:
         CONVO: Conversation = init_convo(
-            # context_code="\n\n".join(all_code),
             context_code="No code provided, ignore.",
             user_question=first_msg["output"],
-            model_name=settings["Model"],
+            model_name=selected_model,  # Use the selected model here
         )
 
-        # Cache the updated conversation, before you probe_llm, cause async magic
+        # Cache the updated conversation
         cl.user_session.set("CONVO", CONVO)
 
-        # Let's goooo
+        # Let's start the conversation
         await run_conversation()
 
 
