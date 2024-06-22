@@ -184,22 +184,33 @@ class Conversation(BaseModel):
     interpreter: Interpreter = Field(default_factory=Interpreter)
 
     @property
-    def token_encoding(self) -> tiktoken.Encoding:
+    def encoding(self) -> tiktoken.Encoding:
         if self.model_name is not None:
             if "gpt" in self.model_name.lower():
                 return tiktoken.encoding_for_model(self.model_name)
 
     @property
     def total_tokens(self) -> int:
-        return sum(
-            msg.content.tokens(enc=self.token_encoding) for msg in self.messages_
-        )
+        return sum(msg.content.tokens(enc=self.encoding) for msg in self.messages_)
 
     @property
     def messages(self):
         return self.messages_
 
-    def __request_payload__(self, max_tokens: int, stream: bool) -> dict:
+    def __to_dict__(self) -> List[dict]:
+        return [
+            {
+                "role": m.role,
+                "content": (
+                    m.content.text
+                    if isinstance(m.content, TextContent)
+                    else m.content.model_dump_json()
+                ),
+            }
+            for m in self.messages_
+        ]
+
+    def __payload__(self, max_tokens: int, stream: bool) -> dict:
         tool = {
             "type": "function",
             "function": {
@@ -220,7 +231,7 @@ class Conversation(BaseModel):
         return {
             "model": self.model_name,
             "temperature": 0.3,
-            "messages": self.to_dict(),
+            "messages": self.__to_dict__(),
             "stream": stream,
             "max_tokens": max_tokens,
             "tools": [tool],
@@ -252,23 +263,10 @@ class Conversation(BaseModel):
     def append(self, message: Union[User, Assistant, System]) -> None:
         self.messages_.append(message)
 
-    def to_dict(self) -> List[dict]:
-        return [
-            {
-                "role": m.role,
-                "content": (
-                    m.content.text
-                    if isinstance(m.content, TextContent)
-                    else m.content.model_dump_json()
-                ),
-            }
-            for m in self.messages_
-        ]
-
     async def call_llm(self, max_tokens: int, stream: bool = False):
         """Calls the LLM, handles responses, and manages tool calls."""
         try:
-            response = await acompletion(**self.__request_payload__(max_tokens, stream))
+            response = await acompletion(**self.__payload__(max_tokens, stream))
 
             if stream:
                 current_tool_call = None
