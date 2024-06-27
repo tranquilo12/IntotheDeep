@@ -35,5 +35,5 @@ CMD [\
     "--KernelGatewayApp.port=8888",\
     "--KernelGatewayApp.allow_origin='*'",\
     "--KernelGatewayApp.api='kernel_gateway.notebook_http'",\
-    "--KernelGatewayApp.seed_uri='/app/example.ipynb'"\
+    "--KernelGatewayApp.seed_uri='example.ipynb'"\
     ]

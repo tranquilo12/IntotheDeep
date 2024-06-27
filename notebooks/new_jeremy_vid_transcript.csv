@@ -1,0 +1,1003 @@
+,Text
+00:00:00, okay hi everybody I'm Jeremy and this is the first of our answer AI developer
+00:00:08, chats where I guess we have two audiences one is our fellow R&D Folks at
+00:00:16, answer. who hopefully this will be a useful little summary of what we've been working on for them but we thought we'd
+00:00:21, also make it public because why not that way everybody can see it so we've got
+00:00:26, jonno here we've got Alexis here we've got Griffin here hi all hey um and we're going to be
+00:00:34, talking about a new library I've been working on called
+00:00:40, Claudette which is claude's friend um
+00:00:46, and jonno's been helping me a bit with the library but he's going to I think largely Fain ignorance about it today in
+00:00:52, order to be an interviewer to attempt to extract all its Secrets out of my head
+00:00:59, uh does that sound about right jonno I think so yeah okay I'm ready when you
+00:01:05, are cool well maybe um we should start with J Pull up the the landing page and
+00:01:12, then I think there's a few different directions that I'd love to hear from you one is you know the specifics of
+00:01:18, this Library how does it work um but maybe also since especially this is the first like developer chat and preview uh
+00:01:24, we can also go into some of the Met questions of like when does this when does something become a library like this um how's it built uh what's the
+00:01:31, motivation etc etc sounds good all right
+00:01:36, so here we are the landing page so it's a GitHub repo it's a public
+00:01:44, repo and in the top right is a link to the
+00:01:50, documentation uh and the documentation that you see here the index is identical
+00:01:55, to the readme um but it's better to read it here because it a bit
+00:02:02, better cool fantastic and this is a library that people can p install um y
+00:02:07, exactly here it is hip and store claudet and you can just follow
+00:02:14, along hopefully when you type the things in here it'll you'll get the same thing
+00:02:20, um or you could um uh so the that that main page is
+00:02:28, actually also an index. P andb so you could also uh open that up
+00:02:34, in cab for example and if you don't want to install it locally should all work
+00:02:39, fine cool so I'll start with the big question which is uh why does this exist what what is the point of this um this
+00:02:45, library in a in a nutshell okay so um by way of background
+00:02:53, um I I started working on for a couple of reasons one is just um
+00:03:01, I feel like felt like still feel a bit like Claude is a bit underrated and
+00:03:07, under appreciated I think most people use open AI because that's kind of what
+00:03:12, we're used to and it's pretty good um and and with 40 it's just got better um
+00:03:18, but claude's also pretty good and the nice thing about some of these models
+00:03:24, now with also Google there is they all have their things they're better at and things that they're worse at so for
+00:03:30, example I'm pretty interested in in Haiku and in in Google's flash
+00:03:38, um they both seem like pretty capable models that maybe they don't know about
+00:03:43, much but they're but they're pretty good at doing stuff and so they might be good with retrieval which is where you can
+00:03:50, like help it with not knowing stuff um so yeah it's was pretty interested particularly in playing with Haiku um
+00:03:57, and then a second reason is just I I did this video called a hackers
+00:04:03, guide to llms last year and I just recorded it for a conference really just
+00:04:09, to help out a friend to be honest um and I put it up online publicly because I do
+00:04:14," that for everything and it became kind of to my surprise my most popular video ever it's about to hit 500,000 views um"
+00:04:22, and one of the things I did in that was to say like oh look you can create something
+00:04:28, that like has the kind of behavior you're used to seeing and things like Constructor and
+00:04:34, Lang chain and whatever else in a dozen lines of code so like you don't have to
+00:04:40, always use big complex Frameworks a lot of people said to me like oh that's it's I would love to be able to use a library
+00:04:46, that that's that small so I don't have to like copy and paste yours and so I thought like yeah okay I'll I'll try and
+00:04:51, like build something that's super simple you know very kind of
+00:04:58, transparent minimum kind of number of abstractions um that people can use and
+00:05:04, that way they still don't have to write their own but they also don't have to feel like it's a mysterious thing so
+00:05:09, yeah so Claudette is designed to be this like uh fairly
+00:05:16, minimal you know like no really very few abstractions or weird new things to learn take advantage of like just python
+00:05:24, stuff um for CLA um but also to be yeah
+00:05:29, pretty capable and and pretty convenient cool you think it would be
+00:05:36, fair to say that this is more replacing the maybe more of a Bose code that we've copied and pasted from our own
+00:05:42, implementations a few times versus introducing too many like completely new abstractions is that the kind of level that it's yeah I think like a lot of
+00:05:48, people got their start with llms using stuff like Lang
+00:05:54, chain which I think is a really good way to get started in some ways and that you can like it's got good documentation and
+00:06:00, good demos but a lot of people kind of come away feeling like I don't really know what it's doing
+00:06:07, you know and I don't really know how to improve it and I don't feel like I'm really learning at this point you know
+00:06:12, and also like I don't really know how to use all my knowledge of python to build on top of this because it's a whole new
+00:06:18, set of abstractions so partly it's kind of for those folks to be like okay
+00:06:24, here's here's how you can do things a bit closer to the Bone without doing everything yourself from scratch and or
+00:06:31, for people who are already reasonably capable python programmers feel like
+00:06:36, okay I want to leverage that jump into LMS and leverage my existing programming knowledge this is a path that doesn't
+00:06:43, involve first learning some big new framework full of lots of abstractions and tens of thousands of lines of code
+00:06:49, to something with like I don't know what it is maybe a couple of hundred lines of code um all of which
+00:06:55, is super clear and documented and you know you can see step by step exactly what it's
+00:07:01, doing cool well that sounds that sounds good uh do you want to start with like a demo of what it does or do you want to start straight with those 100 lines of
+00:07:07, code and and step us through it you know what I'm inclined normally I'd say do the demo but I'm actually inclined to
+00:07:14, step through the code because the code's a bit as you know uh weird in that the
+00:07:21, code is like so if you click on claudet Source we can read the source
+00:07:28, code this is a source code it doesn't look like most source code and that's because um I tried
+00:07:36, something slightly different to what I've usually done in the past which I've tried to create a truly literate
+00:07:42, program um so the source code of this is something that we can and will read top to bottom and uh um you'll see the
+00:07:50, entire implementation but it also is designed to teach you about what you know the API it's
+00:07:57, building on top of and the things that it's doing to build on top of that and so forth so I think the best way to show
+00:08:03, you what it does is to also show you how it does it so I'm here in a notebook and so uh
+00:08:12, that uh source code we were viewing was just the thing called quto which is a
+00:08:19, blogging platform that amongst other things can render notebooks so we're just seeing the rendered version of this notebook um
+00:08:27, and so the bits that you see in Gray our code cells in the
+00:08:37, notebook here's this code cell here's this code cell
+00:08:44, um and then you'll see some
+00:08:50, bits that have this little exported Source thing here which you can close
+00:08:55, and open you can close them all at once from this menu here hide all code and that basically will get rid of all
+00:09:01, the bits that are actually the source code of the model and all you'll be left with is the examples right um and if we
+00:09:08, say show or code then you can see yeah this is actually part of the source code and so the way that
+00:09:14, works is um these things that they say exports so this is bits that actually
+00:09:20, becomes part of the library itself okay so
+00:09:26, um the idea of this notebook is like yeah as I said as well as being the entire source code of the library it's
+00:09:32, also like by stepping through it we'll see how Claude works and so Claude has
+00:09:39, three models uh Opus Sonet and Haiku so we just Chuck them into an into a list
+00:09:45, so that anybody now who's using claudet can see the models in it and so the way
+00:09:51, we can see how to use it is if is that the readme in
+00:09:58, um uh um and the homepage um again is actually a rendered version of this of a
+00:10:04, notebook and it's called index. APB and so we we can import from claudet
+00:10:10, and so you can see for example if I say models it shows me the same models
+00:10:15, that came from here okay so that's how these work it ends up as part of this flaw DEET
+00:10:21, notebook um so that's the best Flo bottle middle worst but I like using this one
+00:10:29, one hiu because it's really fast and really cheap and I think it's interesting to experiment with like how much more you can do with these fast
+00:10:35, cheap models now um so that's the one I thought we try
+00:10:42, out um any questions or comments so far from
+00:10:48, anybody I guess so far this is like there's no reason you couldn't just write the full name of the model every
+00:10:53, time like a lot of people do and if a new one comes out that's you can do that um but this is just trying to make it
+00:10:59, like as smooth as possible even to these tiny little details right yeah I don't want to have to remember these things
+00:11:05, and obviously I wouldn't remember those dates or whatever so otherwise I could copy and paste them um but yeah I find
+00:11:11, i' I've been enjoying I've been using this for a few weeks now um once it got to a reasonably usable point and
+00:11:17, definitely this tiny minor thing is something I found nice is to not have to think about model names over again and
+00:11:23, also know that it goes like best middle worst so I don't even have to you know I just go straight to like okay worst one
+00:11:31, cool um so they provide a an SDK anthropic so their um SDK gives you this
+00:11:41, anthropic class you could import from so you can pip install it if you pip install claudet you'll get this for free
+00:11:48, um so I think like it's nice if you're going to show somebody how to use your code
+00:11:56, you should first of all show how to use the things that your code uses so in this case basically the thing we use is
+00:12:01, the anthropic SDK so let's use it okay so the way it works is that you create
+00:12:09, the client and then you call messages. create and then you pass in some
+00:12:15, messages so I'm going to pass in a message I'm Jeremy uh each message has a role of
+00:12:22, either user or assistant and in fact they always this is like if you think
+00:12:28, about it it's actually unnecessary because they always have to go user assistant user assistant user assistant
+00:12:34, you know um so if you pass in the wrong one you get an error so strictly
+00:12:39, speaking they're kind of redundant so in this case and they're just dictionaries right so I'm going to
+00:12:45, pass in a list of messages it contains one message it's a user message so this is something I've said where else the
+00:12:51, assistant is something the model said and it says I'm Jeremy and then you tell it what model to use and then you can
+00:12:57, pass in various other things um um as you can see there's a number of
+00:13:05, other things that you can pass in like a system prompt stop sequences and so forth um and you can see here they
+00:13:11, actually they check for what kind of model you want um so if I go ahead and run
+00:13:19, that I get back a message and so messages can be dictionaries or they can
+00:13:26, also be like certain types of object and on the whole it doesn't really matter
+00:13:31, which you choose when you build them it's easier just to make them dictionaries so a message has an ID I
+00:13:37, haven't used that for anything really and it tells you what model you used now this one's got a role of
+00:13:43, assistant um and it's a message and it tells you
+00:13:49, how many tokens we used uh if you're not sure what tokens
+00:13:54, are you know and kind of Basics like that then check out this hacker guide language models you know where I explain
+00:14:02, all those kinds of Basics um but the main thing is the
+00:14:07, content right and the content is text it could also reply with images for instance so this is text and the text is
+00:14:16, that's what it has to say for me okay so that's that's basically how it works
+00:14:22, it's a nice simple API design I really like it uh the the the open AI one is
+00:14:29, more complicated to work with because they didn't decide on this basic idea of like oh user assistant user
+00:14:35, assistant okay so one thing I really like question yeah hit me so one thing I
+00:14:42, know and uh sure lots of other people do as well is that often when you interact with an assistant you provide a system
+00:14:49, message or guidance about how the assistant should see their role here you
+00:14:55, didn't you just started right off with a yeah role from yourself as a user is that because the API or this Library
+00:15:02, already starts with a default uh guidance to the assistant not there's a system prompt here okay and the default
+00:15:08, is not given so um yeah language models
+00:15:13, are perfectly happy to talk to you without a system prompt just means
+00:15:19, they're you know they have they have no extra information but they went through
+00:15:24, instruction fine tuning and rhf you know some of those examples would have had no system problem so they they know how to
+00:15:30, they have some kind of default personality if you like yeah cool thanks um okay so I
+00:15:39, always think like my notebook is both where I'm working so I want it to be like clear
+00:15:44, and simple to use and I also know it's going to end up rendered as our documentation and as our kind of
+00:15:50, rendered source so I I don't really want things to look like this so the first thing I did was to
+00:15:57, format the output um so here is part of the API this is
+00:16:02, exported um so the first thing I wanted to do was just like find the content in
+00:16:10, here um and so they uh and so there's a number this is an array as you can see
+00:16:15, of blocks so the content is a text block so I just this is just something that
+00:16:21, finds the first text block you know it's like I mean it's tiny
+00:16:26, um and so that means that now now at least I've kind of get got down to the bit that
+00:16:31, has the bit I normally care about because I don't normally care about the ID I already know what the model is I
+00:16:37, know what the r is going to be Etc um and then so from the text block I
+00:16:44, want to pull out the text so this is just something that pulls out the text and so now from now on I can always just
+00:16:50, say contents and get what I care about so something I really like though is like
+00:16:57, okay this is good but sometimes I know the extra information like the stop sequence or the usage so in Jupiter if
+00:17:04, you um create this particular named method representation in
+00:17:10, markdown um for an object then it displays that object using that markdown
+00:17:18, so in this case uh I'm going to put the contents of the object followed by the
+00:17:25, details as a list and so you can see what that looks like here there's the
+00:17:31, contents and there's the details and if you're wondering like
+00:17:37, okay how did Jeremy add this Behavior to anthropics class well this is a nice
+00:17:46, little fast core thing called patch where if you define a function and you say patch and you give it one or more
+00:17:52, types it changes those existing types to give it this Behavior so this is now if
+00:17:59, we look at tools beta message. rep markdown
+00:18:05, there we go we just put it in there so that's nice and so the other yeah I was
+00:18:11, going to say there's like a a trade-off in terms of time here where if you only ever had to look at something once you
+00:18:17, just manually type out response. messages Z do block whatever choices.
+00:18:24, text right you type all that up if you have to do it a million times it's it's very nice to have these convenient
+00:18:29, yeah also for the docs right like every time I want to show what the response is
+00:18:35, this is now free I think that's nice um
+00:18:40, yeah so I don't yeah so I actually what I'm describing here is not
+00:18:47, the exact order it happened in in my head you know because yeah it wasn't until I did this a couple of times and
+00:18:52, was like trying to find the contents and blah blah blah that I was like oh this is annoying me and I went back and I
+00:18:58, edit it you know know this is probably like 15 minutes later I went back and like yeah I wish that
+00:19:04, existed um I did know that usage tracking was going to be important like you know how much money you spending
+00:19:09, depends on input and output tokens so I decided to make it you know easy to keep
+00:19:15, track of that so I created a little Constructor for usage um I just added a
+00:19:21, property uh to the usage class that adds those together and then I added a
+00:19:27, representation this one is used for Strings as well this is part of python itself um if you add this in so now if I
+00:19:34, say usage I can see all that information that was nice and then since we want to be able to track usage we have to be
+00:19:40, able to add usage things together so if you override done to add in Python it
+00:19:46, lets you use plus so um that's something else I decided to
+00:19:51, do um and so at this point yeah I kind of felt like you know these basic things
+00:19:56, I'm working with all the time I should be able to use them conveniently and only took a few minutes to add those and
+00:20:04, then ditto I notic a lot of people in fact nearly everybody including the anthropic
+00:20:10, documentation manually writes these I mean again it doesn't take long but it doesn't take very long to write this
+00:20:16, once either and now you know if you're just something as simple as defaulting
+00:20:21, the role then it's just a bit shorter I can I'll say make message and it's just creating that
+00:20:27, dictionary okay so now I can do exactly the same
+00:20:32, thing um okay and so then since it always goes user assistant user
+00:20:38, assistant user assistant I thought okay you should be to just send in a list of strings and it just figures that out so
+00:20:44, this is just going using i% two to jump between user and assistant
+00:20:52, um and you know make message I then realized okay we should
+00:20:57, change it slightly so so like if it's already a dictionary we shouldn't change it and stuff like that but you know
+00:21:03, basically as you can see here I can now pass in a list of messages a bit more
+00:21:09, easily so my prompt was I'm
+00:21:14, Jeremy R is a response
+00:21:21, and then I've got another string so um if I pass in something
+00:21:30, which has a Content attribute then
+00:21:35, I use that uh and so that way you can see the messages now I've got I'm Jeremy
+00:21:41, and then the assistant contains the response from the assistant so it's it's happy with that as well you
+00:21:48, know it doesn't have to be a string and so this is how and okay again from
+00:21:53, people if you've watched my llm hackers guide you know this um language models
+00:21:59, currently have no State like you know when you chat with chat GPT it looks like it has State you know that like you
+00:22:06, can ask follow-up questions but actually the entire previous dialogue gets sent each time so when I say I forgot my name
+00:22:13, can you remind me please I also have to pass it all of my previous questions and all of its previous answers and that's
+00:22:20, how it knows what's happened and so then
+00:22:25, hopefully okay I don't know your name I referred to as with Jeremy all right well so you do know thank you so turns
+00:22:31, out my name is Jeremy okay so I feel like something as simple as this is already useful for experimenting and
+00:22:39, playing around and for me I would rather generally use something like a notebook
+00:22:45, interface for interacting with a model than the kind of default chat GPT thing
+00:22:52, or CLA thing this where I can like save by notebooks I can go back and experiment I
+00:22:58, can do things programmatically so this was a big kind of thing for me as like okay I want
+00:23:04, to I want to make a notebook at least as ergonomic as chat GPT plus well of the
+00:23:12, additional usability of a notebook so these These are the little things that I think
+00:23:18, help um passing the model each time seems weird because I generally like
+00:23:24, pick the model once per session so I just created this tiny class to remember what model I'm working with so that's
+00:23:31, what this client class does and the second thing it's going to do is it's going to keep track of my
+00:23:36, usage so maybe the the the transition that I see happening right now is everything up until this point was like
+00:23:43, housekeeping of I'm doing exactly the same things the official API can do but I'm just making like my own convenience
+00:23:49, functions for that um but then the official API doesn't give you tracking usage of multiple conversations keeping
+00:23:55, track of the history and all of that so it seems like now we're shifting to like okay I can do the same things that the
+00:24:00, API allows me to do but now I have to I don't have to type as much I've got my convenience functions yeah but now it's
+00:24:05, like okay what else would I'd like to do I'd like to start tracking usage model setting okay and this is
+00:24:10, kind of important to me because I don't want to spend all my money unknowingly so I
+00:24:17, want it to be really easy and so what I used to do was to like always go back to the open AI or whatever web page and
+00:24:22, check the billing um because you can actually blow out things pretty quickly so this it's just like I just saying
+00:24:30, like Okay well let's just start with a use of zero right and then I just wrote
+00:24:35, this tiny little private thing here we'll ignore preu for now which just
+00:24:41, stores what the last result was and adds the usage so now when I call it a few
+00:24:48, times um you know each time I call it it's just going to remember the usage and so again I just going to
+00:24:56, ignore stream for a moment um so then I Define d to call so D to call is the
+00:25:03, thing that you basically create an object and then you could pretend it's a function so it's a thing that makes it
+00:25:09, callable and so when I call this function I'll come back to some of the details in a moment but the main thing
+00:25:16, it does is it calls make messages on your messages and then it calls
+00:25:24, the messages. create and then it
+00:25:29, remembers the result and keeps track of the usage so basically the key Behavior now is that when I start it's got zero
+00:25:37, usage I do something and I've now tracked the usage and so if I call
+00:25:43, it again that 20 should be higher now
+00:25:49, 40 um so it's still not remembering my chat history or anything it's just my
+00:25:54, usage history so I like to yeah I like to do like very it all at a time and so
+00:26:00, you'll see like this is like a large function by my standards it's like 1 2 3
+00:26:06, four five six seven eight whole lines that's I don't want to get much bigger than that because my brain's very small
+00:26:12, so I can't keep it all in my head so that's just a small amount of stuff so there's a couple of other things we do
+00:26:18, here one is we do something which anthropic is one of the few companies to
+00:26:26, officially support which is called pre which is where you can say to anthropic
+00:26:32, okay this is my question what's the meaning of life and you answered with
+00:26:38, this starting point like it's not you say you don't say please answer with this you literally it literally has to
+00:26:45, start its answer with this that's called prefill so if I call call it that's my
+00:26:52, object with this question with this prefill it forces it to start without answer
+00:26:59, so um yeah so basically when you call this little tracking thing which takes
+00:27:05, track of the usage this is where you also pass in the prefill and so if you want some prefill then as you can see it
+00:27:12, just adds it in um and the way it also so that's just to the answer because anthropic doesn't put it in the answer
+00:27:19, and the way anthropic actually implements this is that um
+00:27:30, the messages it gets appended as an additional assistant message so it's the
+00:27:35, messages plus the pre-fill so basically you pass in an assistant message at the end and then the assistant's like oh
+00:27:41, that's what I started my answer with this isn't documented necessarily in their API because it's it's it's like
+00:27:48, oh this is how you send a user message and we'll respond with an assistant message and you have to kind of dig a little bit more to say oh if I send you
+00:27:54, an assistant message as the last message in the conversation this is how we'll interpret that we'll continue on in that
+00:27:59, message and like yeah they've got it here so they've got you know claude's anthropic is good with this you know um
+00:28:07, they actually they understand that pre that that prefill is incredibly powerful like particularly Claude loves it Claude
+00:28:13, like Claud does not listen to System prompts much at all and this is why like
+00:28:19, each different model you have to learn about its quirks you know so Claude ignores system prompts but if you tell
+00:28:26, it oh this is how you you answered the last three questions it just jumps into that role now it's like oh this is how I
+00:28:33, behave you know and it'll it'll keep doing that and you can you know maintain
+00:28:38, character consistency so I use this a
+00:28:43, lot um and here's a good example like start your assistant with open curly
+00:28:49, brace I mean they they support tool calling or whatever but this is like a simple way so sometimes I will like
+00:28:56, start my response with backtick backtick backtick python that forces it to start
+00:29:01, answering the python code so yeah lots of useful things you can do with prefill have you noticed
+00:29:09, personally that the uh Improvement is significant when you use prefill I mean there I see they're recommending it but
+00:29:15, I'm just curious what your anecdotal impression is I mean it it it it answers it answers it with that St you know so
+00:29:22, yeah if you want it to answer with that start then it's it's perfect um
+00:29:28, uh unfortunately gp4 doesn't generally do it properly uh Google's Gemini Pro
+00:29:34, does and Google's Gemini Flash doesn't so they're a bit all over the place at
+00:29:39, the moment um so then yeah the other thing you can
+00:29:45, do is streaming now streaming is a bit hard to see with a short
+00:29:52, question so we'll make a longer one and so you can see it generally
+00:29:57, comes out B pop pop pop pop I don't have any pre-written funny that's terrible oh you know why because we're
+00:30:04, using Hau and Hau is not at all creative so if we go C
+00:30:13, do model equals Model Z we can up skill
+00:30:19, to Opus try
+00:30:26, again all right slow enough I don't think I want to wait for do the whole thing
+00:30:34, anyway this just G to keep going isn't it stop all
+00:30:40, right um okay let's go back to this one yeah so
+00:30:50, streaming you know it's one of these things I get a bit confused about like
+00:30:55, it's as simple as calling um messages. stream instead of messages.
+00:31:03, create but the thing you get back is an iterator which you have to yield and then once it's finished doing
+00:31:11, that it stores the final message in here and that's also got the usage in it so
+00:31:18, anyway this like this is some little things which without the framework would be annoying um so with
+00:31:25, this little tiny framework it's automatic and and you see this in the notebook in its final form right but
+00:31:30, this uh call method was first written without any streaming like get it working on the regular Cas yeah no
+00:31:38, prefill first so then it's it's you know three lines and then okay
+00:31:46, is that yeah yeah um and then you know we can
+00:31:53, test the stream function by itself and test it out with the smaller Primitives first and then put it into a function
+00:32:00, that then finally gets integrated in yeah exactly and this is like a one of
+00:32:07, these little weird complexities of aan
+00:32:12, is J was asking me yesterday it's like oh we could just refactor this and move this into here and then we don't need a
+00:32:19, whole separate method but actually we can't as soon as there's a yield anywhere in a function the function is
+00:32:25, no longer a function and it's now a co-routine and it behaves differently so this is kind of weird thing where you
+00:32:31, have to pull your yields out into separate methods yeah it's a minor
+00:32:37, digression um okay so yeah you can see it's nice that
+00:32:43, it's now tracking our usage across all these things um and we can add the two
+00:32:50, together prefill and streaming okay yeah any questions or
+00:32:56, comments so far yeah um and is there a way to try to
+00:33:03, reset uh the counter if you wanted just to be able to start over at some point I
+00:33:10, mean the the the way I would do it was I would just create a new client C equals
+00:33:16, okay you know but you could certainly go C do use equals usage
+00:33:21, 00 in fact z z is the default so actually now I think about it we could
+00:33:26, slightly improve our code to remove three characters um which would be a big
+00:33:32, benefit because we don't like characters we can get rid of those well there you go so yeah you could just
+00:33:41, say um C do use equals
+00:33:49, usage and you know in general like I think people don't do this kind of like
+00:33:57, manipulating the attributes of objects directly enough like why not you know you don't have to do everything through
+00:34:04, like people often create some kind of like SE usage method or something like no don't do that paranoid Java style
+00:34:11, that exactly emerged like a decade ago for some reason speaking of yeah oh yeah
+00:34:17, yeah that's longer speaking of um directly manipulating properties of
+00:34:22, objects so you showed how we can use prefill to predefine the beginning of
+00:34:28, the assistant response if I've had a multi-turn exchange with an assistant can I just go in there and clobber one
+00:34:36, of the earlier assistant messages to convince the assistant that it said something it didn't because sometimes
+00:34:41, actually we just we we um we don't have any state in our class right okay so
+00:34:50, we're passing in um so here we're passing in a single
+00:34:56, string right but we could absolutely pass in a list uh so I said
+00:35:04, hi um and the model said hi to you
+00:35:11, too um okay I am
+00:35:19, Plato I am socres
+00:35:25, okay so me about yourself I don't know what will
+00:35:30, happen here but we've just convincing it that this is the conversation that it's occurred so now Claude is probably going
+00:35:35, to be slightly confused by uh the fact that it reported itself not to be claw
+00:35:41, uh no I mean I don't we haven't set a sister message to say it's clawed
+00:35:47, so there you go no not at all confused I am
+00:35:52, Socrates so as I said you know claude's very you know happy
+00:35:58, to be told what it said and it will go along with it I'm very fond of Claude Claud has Good
+00:36:04, Vibes oh oh you may be
+00:36:10, surprised to hear I am actually
+00:36:20, Australian this is the point of the video where we get sidetracked and talk to Opus for a good long time
+00:36:29, not very interesting what do you say
+00:36:34, mate fair enough okay so yeah you can tell it anything you like is you know is
+00:36:40, the conversation because it's got no state now it's forgotten everything it's just said the only thing it remembers is
+00:36:45, it's use so that's all we've done so far so
+00:36:51, remembering oh actually so before we do that um we'll talk about tool use
+00:36:57, so yeah basically I wanted to before we got into like multi-turn dialogue automatic stuff
+00:37:04, I wanted to kind of have the basic behavior that you know
+00:37:09, anthropic um anthropics SDK provides I wanted to like you know have it
+00:37:15, conveniently wrapped so
+00:37:20, um tool use is officially still in beta but I'm sure it won't be for long can I
+00:37:27, can I ask about one more pre- tool use case that I think occurs to me right away and so maybe it'll occur to other people if they're curious um one thing
+00:37:36, you often find yourself doing when you're experimenting with prompts is going through a lot of variations of the
+00:37:41, same thing so you have your template and then you want to vary different parts of it uh and before you you know write code
+00:37:48, to churn out variations you're usually doing it a bit ad hoc so using this API
+00:37:54, the way it is now if I had a client and a bit of an exchange already built up
+00:37:59, and then I wanted to kind of fork that and create five of them and then continue them in five different ways can
+00:38:04, I just duplicate one would the would the right way to do that would be to duplicate the client would the right way
+00:38:11, to do that just to be to extract the do it represents the exchange and create new clients I'm just getting a sense for
+00:38:16, what would be the fluid way of doing it with this API let's do it
+00:38:25, okay um
+00:38:31, okay options equals how do you spell Zimbabwe and
+00:38:38, jono Zim yep ewe
+00:38:43, yep print contents
+00:38:59, oh you know what these are boring again because I think we've gone back to our old model see do model equals
+00:39:08, models zero no wonder it's got so dull hu is just like really doesn't like
+00:39:19, pretending oh come on look what it's doing
+00:39:30, ah all right anyway clud is being a total
+00:39:36, disappointment so the fact that it's reasonable to do this just by slamming a new list into the C function is an
+00:39:43, indication of what you just said which is that there's no State hiding inside the C function that we need to worry
+00:39:48, about mangling when we do that that's right there's no State at all got it so when we recall it it knows nothing
+00:39:56, about being Socrates whats ever everyone is a totally independent rest call to a there's no session ID there's no nothing
+00:40:03, to tie these things together all right we probably just
+00:40:09, spent cents on that
+00:40:14, question it's so funny they're like what you they like a few dollars per million tokens or something like I look at this
+00:40:20, like who all those tokens and like oh yeah it's proba like one cent or something less I got to get used to not
+00:40:26, being too scared okay so uh so tool use you know refers
+00:40:36, to things like this get the weather in the given location so there's a tool called get weather and then how would it
+00:40:42, work I don't know it would call some other weather API or something um so both in open Ai and in
+00:40:51, CL pools are specified using this particular format which is called Jon on
+00:41:01, schema and my goal is that you should never have to think about that um for some reason nearly
+00:41:07, everything you see in all of their documentation writes this all out manually which I think is pretty
+00:41:13, horrible so instead we're going to create a a very complicated tool it's something that adds two things
+00:41:19, together and so I think the right way to create a to is to just create a python
+00:41:24, function um so the thing about these tools as you see
+00:41:30, from their example is they really care a lot about
+00:41:35, like descriptions of the tool descriptions of each parameter you know and they they say quite a
+00:41:42, lot uh in their documentation about like how important all these details are to
+00:41:50, provide so um luckily I wrote a thing a
+00:41:55, couple of years ago called documents that makes it really easy to add information to your functions and it
+00:42:02, basically uses built-in python stuff so the names of each parameter is just the name of the parameter the type of the
+00:42:08, parameter is the type the default the parameter is the default and the description of the parameter is the
+00:42:13, comment that you put after it or if you want more room you can put the comment
+00:42:19, before it uh documents is happy with either um and you can also put a
+00:42:25, description of the result you can also put a description of the function and so if you do all those
+00:42:32, things um then you can see here I said tools equals get schema this is the thing that
+00:42:38, creates the Json schema so if I say tools there you go you can see it's created the Json schema from that
+00:42:46, including the comments have all appeared um and the return comment ends
+00:42:53, up in this returns here and if you didn't do any of
+00:42:58, that like if you just wrote a function sums that took two untyped variables A and B you would still get something
+00:43:04, functional the model would probably still be able to use it but it just wouldn't be recommended is that
+00:43:09, right um I think well I mean my understanding is you have to pass in a
+00:43:16, Json schema MH so if you don't pass in a Json schema so you would have to have
+00:43:22, somehow create that Jon schema I don't know if it's got some default thing that Auto generates one for
+00:43:28, you um oh I'm I'm more thinking like if we don't follow the documents format for
+00:43:34, example oh yeah so if we got rid of these um you know so if we got rid of
+00:43:40, the documents yep you could get rid of the doc string you could get rid of the def
+00:43:46, the types and the defaults you could do that yeah in which
+00:43:51, case the um that's okay so it does at least need
+00:43:57, types so let's add types ah well that's a bit of a bug in
+00:44:03, my code huh no yeah it appears like you
+00:44:08, have to annotate it there well I'll fix that it shouldn't be necessary destion oh okay it at least
+00:44:17, wants a doc string okay so currently that's the
+00:44:22, minimum that it that it needs and I don't know if it actually requires a description I suspect it
+00:44:29, probably does because otherwise maybe I guess it could guess what it's for from the sum from the name but yeah it
+00:44:35, wouldn't be particularly useful so okay so now that we've got a tool
+00:44:45, when we call Claud we can tell it what tools there are and now we're also going
+00:44:51, to add a system prompt and I'm just going to use that system
+00:44:57, you don't have to right if you don't say you have to use it then sometimes it'll try to add it itself but it's not very
+00:45:04, good at adding so I would I like to you know I also think kind of user facing I
+00:45:10, think it's kind of weird the way Claude tends to say okay I will use the sum tool to calculate that sum it loves
+00:45:16, doing that open AI doesn't um I think this is because anthropics a bit like they haven't got as much user facing
+00:45:22, stuff they don't have any user facing tool use yet so yeah I don't I think their tool use is quite as nicely
+00:45:30, described so if we um yeah so if we uh pass in this prompt what is that plus
+00:45:38, that we get back this so we don't get back an
+00:45:46, answer instead we get back a tool use
+00:45:51, message the tool use says what tool to use and what parameters to pass it
+00:46:01, so um I then just wrote this little thing that um you pass in your to use
+00:46:09, block so that's this thing and it grabs the name of the function to
+00:46:15, call and it grabs that function from your symbol table and it calls that
+00:46:22, function with the input that was requested um so when when I said the symbol table or the name space basically
+00:46:30, this is just a dictionary from the name of the tool to the definition of the
+00:46:36, tool um so if you don't pass one it uses globals which in other words is every
+00:46:41, python function you currently have available you probably don't want to do that you know if it's like o os. unlink
+00:46:49, or something um so this little make namespace thing is just something that
+00:46:55, you just pass in a bunch of functions too and it just creates a mapping from
+00:47:01, the name to the function so that way this way yeah I'm just going to say like if I'm a
+00:47:08, somewhat beginner I'm I'm approaching LM I've I've seen your hackers guide you know this this screen full of code has
+00:47:14, quite a lot of Fairly deep python stuff we've got some typing going on I might not know what mappings are or callables
+00:47:20, there's name spaces and get atas and dicks and is instance um how should I
+00:47:26, approach this code versus the maybe the examples that are being intered like because this is the source code of this Library yeah um but you're not writing
+00:47:33, this with lots of comments or explanations it's more like the usage yeah so what what should I like if I
+00:47:38, come to this library and I'm reading this source code how much should I be focusing on the the Deep python
+00:47:43, internals versus the usage versus like the big that's a good question so
+00:47:50, before for someone who doesn't particularly want to learn
+00:47:55, new python things but just wants to use this Library this probably isn't the video
+00:48:01, for you instead just read the docs and none of that like you
+00:48:06, can see in the docs there's nothing weird right the docs just use it
+00:48:14, um and you don't need this video it's really easy to use um so yeah the
+00:48:20, purpose of this discussion is for people who want to go deeper
+00:48:29, and yeah the fact that I'm skipping over these details isn't because either
+00:48:35, they're easy or that everybody should understand them or any of that it's just
+00:48:41, that um they're all things that Google or chat GPT or whatever will perfectly
+00:48:47, happy teach you about so these these are all things that are built into python um but you know yeah you know
+00:48:55, that' probably be part of something called like python Advanced course or something so one of the things a lot of intermediate python programmers tell me
+00:49:02, is that they like reading my code to learn about bits of python they didn't know about and they use it as like
+00:49:09, jumping off points to study um and that's also why like okay
+00:49:14, why do I not have many comments so um my view is that comments should
+00:49:21, describe why you're doing something not what you're doing you know so if if you
+00:49:26, know for something that you could answer like oh what does is is instance abc. mapping do you don't need a comment to
+00:49:33, tell you that you can just Google it and so in this case all of the things I'm doing once you know what the code does
+00:49:41, why is it doing it is actually obvious you know like why do we get the name of the function from the object you know or
+00:49:50, why do we pass the input to the function I mean that's literally what functions are you call them and you pass in the
+00:49:55, input um um yeah so I think that's a good I think that's a good question so i' say like yeah don't
+00:50:03, be you actually don't know need to know any of these details um but if you want to learn
+00:50:10, about them yeah the reason I'm using these features of the languag is because I think they're useful features of the language and if I haven't got a comment
+00:50:18, on them it's because I'm using them in a really normal idiomatic way that isn't worthy of a comment so that means if you
+00:50:24, learn about how to use this thing for this reason that's a perfectly useful thing to to
+00:50:29, learn about and add that like I'm learning this stuff as we code together
+00:50:34, on this as well right like this is you don't have to know any of this to be a good programmer but it's really fun as
+00:50:39, well and I think like some of these things we wrote multiple ways maybe one that was more of a Bose first and then
+00:50:45, we say h think we can do this in this more clever way if we condens it down um so if you if you are watching this and
+00:50:50, you are wanting to learn and you're still like oh I still don't know what some of these things are I can't remember what the double like yeah dig
+00:50:56, in and and find out but it's also like it's totally okay if you're not like comfortable at this yeah the other thing
+00:51:02, I would say is the way I write all of my code pretty much is I don't write it in
+00:51:08, a function I write nearly all of it outside of a function you know in
+00:51:15, cells so you can do the same thing right so like let Set NS
+00:51:22, none so then I can run this it's like oh what the hell is globals it's like oh wow it's everything in
+00:51:30, Python is a dictionary this is a really powerful thing which is well worth knowing about
+00:51:37, um I could offer just yeah sorry but just offer one perspective to maybe make
+00:51:42, a little Bridge from the kind of user point of view to the what why these internals might be unfamiliar point of
+00:51:48, view just to recap and make sure I understand it right from the user point of view here when we use tools we get a
+00:51:55, response back from uh claw in in the way we're doing it now
+00:52:00, that describes a function that we now want to execute correct that's this function to execute and that's the input
+00:52:06, to provide to it so so you know with this Library I can write a function in Python and then
+00:52:13, tell Claude to call the function that's sitting there on my system right yeah if
+00:52:20, it wants to but for that to work if it wants to if it chooses to but for that to work this Library needs to do the
+00:52:26, magic I of reading a Tex string that is cla's response and then in Python having
+00:52:33, that not be a text string but having that become python code that runs in Python and that's a somewhat unfamiliar
+00:52:40, thing to do in Python and that's what's called eval in JavaScript or back in
+00:52:45, lisp where a lot of the stuff got started and because that's not that sort of not we're not actually doing an aval
+00:52:53, right okay that's interesting yeah we're definitely not doing eval we're so
+00:53:00, in the end this is the function we want to call yeah right so I can call that and
+00:53:05, there's the answer um in Python this is just syntax sugar
+00:53:12, basically for passing in a dictionary and dereferencing it so those
+00:53:19, are the same those are literally the same thing as far as python is
+00:53:25, concerned um so [Music] um we would never passed a string of
+00:53:33, code to eval or execute we were just told call this tool and pass in these
+00:53:40, inputs so to find the tool by string we look it up in the symbol table so let's
+00:53:47, just change fc. name to fcor name oops and the name it's giving us is
+00:53:55, the one that we provide Ed earlier mhm yeah it's the name that came from
+00:54:01, our schema which is this name yeah okay so if you look back at our tool
+00:54:08, schema this tool has a name and you can give it lots of tools so later on we might see one where we've got both sums
+00:54:15, and mod playay um and it can pick we'll see this
+00:54:20, later can pick and choose so is we write our function in Python H the
+00:54:26, library automatically knows how to interpret the python and turn it into a structured representation the Jon schema
+00:54:32, that is then fed to claw yes fed to Claud we're also feeding it the name for the function uh that it's going to use
+00:54:39, when it wants to come back to us and say Hey Now call the function when it comes back to us and says hey call the
+00:54:44, function it uses that name we look up the original function and then we execute it yeah and so it decides it
+00:54:50, knows it's got a function that can do this and that it can return this and so
+00:54:57, then if it gets a request that can use that
+00:55:03, tool then it will decide of its own accord okay I'm going to call the function that Jeremy provided the tool
+00:55:10, Jeremy provided yeah so we'll see a bunch of examples of this and this is generally part of What's called the
+00:55:16, react framework nothing to do with react the JavaScript gooey thing but react was
+00:55:22, a paper that basically said like hey you can have language models cor tools and again my
+00:55:30, llm hackers video is the best place to go to learn about the react pattern and
+00:55:36, so here we're implementing the react pattern or at least we're implementing the things necessary for Claude to implement the react pattern using what
+00:55:43, it's call it calls tool calling so we look up the function which is a string
+00:55:48, in this dictionary and we get back the function
+00:55:54, and so we can now call the function so that's what we're
+00:56:03, doing and so I think the key thing here is this idea that like all this is in a notebook you know the source code here
+00:56:10, to this whole thing is in a notebook which means you can play with it which I
+00:56:16, think is fantastically powerful because you never have to guess what something does you
+00:56:21, literally can copy and paste it into a cell and experiment um and that's also worth learning these keyboard shortcuts
+00:56:28, like CV to copy and paste the cell and like apple
+00:56:34, a um Apple left square bracket control shift hyphen you know there's all these nice
+00:56:40, things like worth learning all these keyboard shortcuts to be able to use this dupid at all
+00:56:48, quickly uh anyway the main thing to know is we've now got this thing called core function um which can take the tool use
+00:56:56, request from Claude this function call request and call it and it passes back
+00:57:03, the dictionary with the result of the tool
+00:57:10, call um and when it asked us to make this call it included an
+00:57:17, ID so we have to pass back the same ID to say this is the answer to this
+00:57:23, question and that's the bit that says this is the answer to this
+00:57:29, question that's the answer and so we can now pass that back
+00:57:35, to Claude and Claude will say oh great I got the answer and then it will respond
+00:57:41, with with text so I put all that together here and make tool response
+00:57:47, where you pass in the tool response request from Claude the namespace to search for tools
+00:57:54, or an object to search for um search for tools and we create the message from
+00:58:02, Claude we call that call function for every tool use request there can be more
+00:58:07, than one and we add that to their response and so if you have a look
+00:58:14, now here when we call that it calculates the
+00:58:20, sum and it's going to pass back the going to add in the tool use request
+00:58:27, and the response to that request so we can now go ahead and do
+00:58:36, that and you can see CL Returns the string the response
+00:58:43, so it's turned the result of the tool request into a response and so this is how stuff like
+00:58:50, code interpreter in chat GPT works so it might be easier to see it in
+00:58:56, W in one place and this is like another demo of how we can use it instead of calling functions we can also call
+00:59:03, methods so here's sums again but this time it's a method of a class so we can
+00:59:08, do the same thing get schema dummy. sums yeah so we make the message
+00:59:15, containing our prompt so that's the question what's this plus this we pass that along to Claude Claude
+00:59:22, decides that it wants you to create a tool request make the tool request calculate the answer add that to
+00:59:30, the messages and put it all together
+00:59:37, fzy and there we
+00:59:42, go um
+00:59:47, okay anything worth adding to that so if you're not
+00:59:55, comfortable in familiar with yeah the react framework this
+01:00:00, will feel pretty weird uh definitely worth spending time learning about
+01:00:07, because it's incredibly powerful technique and
+01:00:13, um um opens up a lot of opportunities to because like I think a
+01:00:20, lot of people I certainly feel this way like that there's so many things so many
+01:00:26, things that language models aren't very good at but they're very good at recognizing when it needs to use some
+01:00:33, tool if you tell it like oh you've got access to this you know proof checking
+01:00:38, tool or you've got access to this you know account creation tool or or
+01:00:43, whatever it's good at using those and those tools could be things like
+01:00:50, uh um reroute this call to a customer service representative you know they
+01:00:55, don't have to be text generating tools
+01:01:00, be and there's also no reason you're not under obligation to send the response back to the model right it can actually
+01:01:06, be a useful end point it's like oh I tell the model to look at this query
+01:01:11, from a customer and then respond appropriately and one of the tools is like escalate well if it sends a a tool
+01:01:18, response like a tool request for that function that could be like oh I should like exit this block forget about it
+01:01:25, throw away the history because now I need to like bump this up to some actual human in the loop or the result
+01:01:30, somewhere it's just a very convenient way to get like see yeah we're going to see a bunch more examples in the next
+01:01:37, section because there's a whole uh module called tool Loop which has a
+01:01:42, really nice example actually that came from the anthropic examples of how to use this for customer service
+01:01:50, interaction um but for now yeah you can put that aside don't worry about it um
+01:01:55, because we're going to go to something much more familiar to everybody which is
+01:02:00, chat so chat is just a class which is going to
+01:02:08, keep track of the history so self. is the history and it's going to start out as an empty list there's no
+01:02:15, history um and it's also going to contain the
+01:02:23, client which is the thing we just made and so if you ask the chat for its use
+01:02:28, it'll just pass it along to the client to get its use um you can give it some
+01:02:35, tools and you can give it a system prompt okay so the system prompt pass it
+01:02:42, in no tools no usage no
+01:02:48, history again there's a stream version and a non-stream version so you can pass in stream as
+01:02:54, true or false if you pass in stream it'll use the stream version
+01:02:59, otherwise it won't
+01:03:05, um so again we hatch in ther call now of course we
+01:03:12, don't need to use patch we could have put these methods directly in inside here but I feel like I really prefer to
+01:03:20, do things much more interactively and step by step so this way I can like create my class and then I can just
+01:03:26, gradually add a little bit to it at a time as I need it and I can also document it a little bit as a Time
+01:03:31, rather than having a big wall of code which is just I find overwhelming
+01:03:39, um so all right so there's a prompt so if you pass in the prompt then
+01:03:46, we add that to the history there's a message um
+01:03:56, y get our tools so let's call get schemer for you automatically
+01:04:02, um and then at the end We'll add to the history the results which may include
+01:04:07, tool use so now I can just call chat right
+01:04:14, and and then I can call chat again and as you can see it's now got state it
+01:04:20, knows my name um and the reason why why is
+01:04:26, because each time it calls the client it's passing in the entire history so again we can also add prefill
+01:04:34, just like before we can add streaming just like
+01:04:39, before that's it right so you can see adding chat required almost no code you know
+01:04:47, really it's just a case of adding everything to the history and every time you call the client passing in the whole
+01:04:53, history so that's all a stateful seeming language model
+01:05:02, is um so I don't actually have to write anything to get tool used to work which
+01:05:07, is nice I can just pass in my tools and the nice thing the kind of
+01:05:12, interesting thing here is that because the tool you request and
+01:05:19, response are both added to the history to like do the next step I don't
+01:05:24, pass it anything at all that's already in the history I just run it and it's like goes ahead and tells me the
+01:05:34, answer um okay anything youare of so I
+01:05:39, know in chat GPT it says like it sometimes is would you like to go ahead with this tool activation and here like
+01:05:45, the model is responding with the tool use block like it would like to use this tool do you have a way of interrupting
+01:05:51, before it actually runs the code that you gave it maybe you want to check the inputs or something like that
+01:05:56, um so you would um need to put that into your function okay so I've certainly
+01:06:05, done that before so like one of the things in fact we'll see it shortly I've got a code interpreter and you don't
+01:06:12, want to run arbitrary code so it asks you if you want to complete it and a part of the definition of the tool will
+01:06:19, be what is the response that you get Claude if the users declined your request to run the tool
+01:06:26, cool um okay so I think people might imagine yeah so I had
+01:06:34, my earlier question before we introduced chat where we uh forked a conversation
+01:06:39, as it were just by forcing stuff into earlier exchanges and at that point we were talking about how the interface was
+01:06:45, stateless because there were no like session IDs now that we have these tool interactions with tool IDs does that
+01:06:53, change the story like let's say I had a uh sequence of interactions that involve tool use d d d and now I want to create
+01:07:02, three variations to explore different ways I might respond um is
+01:07:07, that problematic or no not at all I mean let's do it so actually okay let's try it actually I'm not
+01:07:15, Jeremy I'm actually Alexis might want a zero index there
+01:07:23, thanks
+01:07:29, um so at this point it's now going to be very confused
+01:07:37, because I Alexis it's nice to meet you Jeremy what's my name your name is
+01:07:43, Jeremy so let's
+01:07:49, try po thing
+01:07:55, [Laughter] Lord
+01:08:03, really does that answer your question Alexis if that is your real name this is abusive
+01:08:11, Claud uh one day this will be illegal yeah
+01:08:17, um and I also had a question too um yes and if Claude like returns a tool
+01:08:27, block um and is that added as a tool block to the history yes does it have to
+01:08:35, be converted to a string in some no no no um the um it's
+01:08:42, just the to block as part of the history the history is perfectly the the messages can be those message objects
+01:08:49, they don't have to be dictionaries and the contents Don't Have To Be Strings okay okay cool
+01:08:56, yep all right so um I was delighted to
+01:09:01, discover how straightforward images are to deal
+01:09:07, with so um yeah I
+01:09:12, mean we can read in our image and it's just a bunch of
+01:09:20, bites um and anthropics documentation
+01:09:25, describes how they expect images to come
+01:09:33, in here we are um so yeah
+01:09:42, basically this is just something which takes in the bites of an image and
+01:09:47, creates the message that they expect which is Type image and the source is a
+01:09:53, dictionary containing base 64 a MIM type and the data anyway you don't have to worry about any of that because
+01:09:59, it does it all for you and so if we have a look
+01:10:07, at that that that's what it looks like um and so because you can and so
+01:10:15, they're kind of quite like this you can have multiple images and multiple pieces of text in a request they can be
+01:10:20, interleaved whatever so to do that it means you can't just pass in strings you
+01:10:25, have to pass in little dictionaries type text in the string so here we can say
+01:10:32, all right let's create this is a single message containing multiple parts so
+01:10:37, maybe these functions should be called image part and text part I don't know um but they're not a single message
+01:10:45, contains an image and this
+01:10:50, prompt and so then we pass that in and you see I'm passing in a list because it's a list of mess meag and the first
+01:10:56, message contains a list of parts and yep it does contain purple
+01:11:03, flowers um and then it's like okay well there's no particular reason to have to manually do these things we can
+01:11:10, perfectly well just look and see oh it's a string we should make it a text message or it's bytes we should make it
+01:11:15, an image message so I just have a little private Helper and then finally I've changed
+01:11:22, make message this is something I remember jonno and I talked about j o was saying I think you said you feel like this is kind of like part of the
+01:11:29, Jeremy way of coding is I don't go back and refactor things but I just redefine them later in my in my notebook and so I
+01:11:37, previously hadn't exported make message I don't export it till now um and so
+01:11:42, here's my final version that's now going to actually call make content to
+01:11:48, automatically handle images as well and so now we can just pass in we can call our client we can pass pass in
+01:11:56, a list of one message the list of one message contains a list of parts as you can
+01:12:05, see so um behind the scenes when we then run
+01:12:11, the last cell it actually generates the python
+01:12:20, file containing all of the exports code so it's 229
+01:12:27, lines um which isn't much particularly when you look at how much empty space there is and these all things say which
+01:12:33, cell it comes from and so forth so terms of actual code it'll be well under 200 lines of
+01:12:41, code okay so that is the first of two modules to look
+01:12:46, at any um thoughts or questions before we move on to the tool
+01:12:52, loop I think it's coming through um maybe like do you want to go into your your
+01:12:59, objective when you started this if if it was beyond what you've already shown like yeah what was the was the goal
+01:13:06, always to keep this a simple selfcontained thing is there plans for this to grow into a fully stateful Chat
+01:13:13, thing they can offer up functionality yeah what's the uh what's the like the Journey of oh I should write this thing
+01:13:20, it's going into this I mean I imagine I must be a very frustrating person to work with because i' never have any
+01:13:26, plans really I just have this like vague intuitive feeling that maybe I should do
+01:13:33, something in this general direction and then people ask me like well why are you doing that so it's
+01:13:38, like I don't know this seems like why not seems like a good idea so like I
+01:13:45, yeah I don't think I had any particular plans to where it would end up I just a sense of
+01:13:50, like um the the way I saw things being written
+01:13:57, including in the anthropic documentation for Claude seemed unfairly difficult you
+01:14:03, know I didn't think people should have to write stuff like that um and then when I started to write
+01:14:09, my own thing using the anthropic client I didn't find it very ergonomic and
+01:14:15, nice I looked at some of the things that are out there you know kind of General
+01:14:22, llm toolkits apis libraries and on the whole I found
+01:14:27, them really complicated too long too many new
+01:14:32, abstractions you know not really taking advantage of my existing python knowledge so I guess that was my high
+01:14:37, level hope um Simon Willison has a nice Library called llm which um jono and I
+01:14:45, started looking at together but it was missing a lot of the features that we wanted and we did end up adding one as a
+01:14:53, PR um not that it's been merged yet um but yeah in the end I guess the other
+01:15:00, thing about like so the interesting thing about Simon's approach with llm is it's a general front end to dozens of
+01:15:08, different llm backends open source and proprietary and inference services and
+01:15:15, as a result uh he kind of has to have this like lowest common denominator API
+01:15:21, of like oh they all support this so that's kind of always support so this
+01:15:27, was a bit of an experiment and being like okay I want to make this as Claud friendly as possible just why I even
+01:15:33, gave it a name based on Claude as I was like I want this to be you know the the that's why I said
+01:15:40, this is claude's friend I wanted to make it like something that worked really well with Claude and I didn't know ahead
+01:15:45, of time whether that would turn out to be something I could then use elsewhere with slight differences or not um so
+01:15:53, that was kind of the goal so [Music] um you know where it's got
+01:16:01, to I think what's happened in the few weeks since I started writing it is
+01:16:07, there's you know been a continuing standardization you know like the
+01:16:13, platforms are getting which is nice more and more similar So the plan now I think
+01:16:19, is that there will be gpt's friend and Gemini's friend
+01:16:25, as well um gpt's friend is nearly done actually
+01:16:32, um maybe they'll have an entirely consistent API we'll see you know or not
+01:16:38, um but again I'm kind of writing each of them to be as good as possible to work
+01:16:44, with that llm and then I'll worry about like okay is it possible to make them compatible with each other
+01:16:50, later and I think that's something I mean i' be interested to hear your thoughts Jon but like when we we wrote
+01:16:56, the the GPT version together and we literally just
+01:17:03, duplicated the original flette notebook started at the top
+01:17:08, cell and just changed the and did a search and replace of anthropic with open
+01:17:14, Ai and of clawed with GPT and then just went through each cell one at a time to see how do
+01:17:20, you port that to the open AI API and like I found that a real like it took us
+01:17:26, what a couple of hours it felt like a very it was very quick yeah simple didn't have to use my brain
+01:17:32, much yeah I mean that's that's maybe worth highlighting is that this is not like this is not the the full and only
+01:17:37, output of the answer AI organization over the last month this is like oh these things Jeremy is tinkering with
+01:17:43, you know just on the side um so maybe yeah it's good to set expectations appropriately but also it did really feel like it was pretty easy especially
+01:17:49, because I think they've all been inspired by the generous way of saying it each other and opening eye I think maybe led the way with some of the API
+01:17:55, stuff so yeah it's it's chat. completion. create versus anthropic client. create or something but in a
+01:18:02, standard IDE environment I think I would have found it a lot harder um you know
+01:18:08, this is because it's so sequential in some ways it could feel like a bit of a constraint but like it does mean you can
+01:18:15, do it from the top and you go all the way through until you get to the bottom you don't have to jump around the place
+01:18:21, right and the only part that was like even mildly tricky then ended up being a change that we made for the open AI one
+01:18:27, which instantly got mirrored back to Claude and then again because they were built in the same way it was like oh we've tweaked the way we do I think was
+01:18:33, streaming one of the things yeah like okay we figured out a nicer way to do that in the second rewrite it was very
+01:18:38, easy to just go and find the equivalent function because the two are are so close together yeah so I I also it's
+01:18:44, quite a nice way to write software especially for this kind of like it's it's not going to grow too much in scope
+01:18:49, beyond what is one or two notebooks of stuff I don't think it's not if it did I would add another project you know or
+01:18:56, another notebook like I wouldn't change these These are kind of like the bases which we can build on yeah yeah okay
+01:19:04, let's keep going then so there's just one more notebook and this hopefully will be a
+01:19:12, useful review of react framework so um
+01:19:18, yeah anthropic has this nice example in their documentation of a customer service
+01:19:23, agent um and again there's a lot of this
+01:19:30, boiler plate you know and then it's all a
+01:19:35, second time because it's now the functions um and so basically the idea
+01:19:41, is here there's like a little pretend bunch of customers and a pretend bunch
+01:19:47, of orders and I made this a bit more a little bit more sophisticated these customers don't have orders the orders
+01:19:53, are not connected to customers in my version I have the orders separately and then
+01:20:00, each customer has a number of orders so it's a kind of a relational but it's
+01:20:05, more like mongod DB style or you know whatever denormalized um not a
+01:20:11, relational database um yeah so they basically describe this rather long complex
+01:20:19, process and as you can see they do absolutely everything manually um which may that's fine if
+01:20:25, you're really trying to show people the very low level details but I thought it'd be fun to you do exactly the same
+01:20:32, thing but make it super simple and also make it more sophisticated by adding some really important features that they
+01:20:38, never implemented so the first feature they Implement is get customer info you pass
+01:20:45, in a customer ID which is a string and you get back their
+01:20:51, details so that's all it is customers. and so you'll see here we've got the
+01:20:58, documents we've got the doc string and we've got the type so
+01:21:03, everything necessary to go a schema um same thing for order
+01:21:11, details orders doget and then something that they
+01:21:16, didn't quite Implement is a proper cancel order so if order ID not in orders so
+01:21:23, you can see we're returning a B so if the order ID is not there we would not able to cancel it if it is
+01:21:31, there then we'll set the status to canceled and return true okay
+01:21:38, so this is interesting now we've got more than one tool
+01:21:44, and the only reason that Claude can possibly know what tool to use when if
+01:21:50, any is from their descriptions in the doc string here right so if we now go chat. tools
+01:21:58, because we passed it in um you can see all the functions are
+01:22:04, there and so when it calls them it's going to behind the scenes automatically call get schema on each
+01:22:12, one but to see what that looks like we could just do it
+01:22:20, here and so get gamer is actually defined in a different Library which we created called tools
+01:22:33, slm okay get schamer oops oh for
+01:22:45, in there we go so you basically end up with something pretty similar to what anthropics version had
+01:22:53, manually so yeah we can say tell me the email address for customer
+01:22:58, C1 and I mean CL Claude doesn't know so it
+01:23:04, says like oh you need to do a tool use you need to call this function you need
+01:23:11, to pass in this input and so remember with our thing
+01:23:16, that's already now already got added to the history so we just call chat and it automatically calls it on our
+01:23:23, history and and there it is and you can see this retrieving customer C1 is because we added a print here so you can
+01:23:31, see as soon as we got that request we went ahead and retrieved C1 and so then we call chat it
+01:23:38, just passes it back and there we go there's our answer so can I Channel my in a our dear
+01:23:45, friend haml has a a thing about saying you've got to show me the prompt I I already want to be able to inspect what's going on maybe we could do this
+01:23:52, at a couple of different levels but like can we see what was fed to the model like what was the history or what was the most recent request something like
+01:23:58, that y so there's our here's our history so the first message we passed in was
+01:24:04, tell me the email address it passed back an assistant message which was a tool use
+01:24:09, block asking for calling this function with these
+01:24:15, parameters and then we passed back and that had a particular ID we passed back saying oh that tool ID request we've
+01:24:20, answered it for you and this was
+01:24:27, the response we got and then it told
+01:24:32, us okay there's it's just telling us what we told it right um and then if I
+01:24:40, was really paranoid like I wanted to see the actual tool definitions and things the actual requests is there a way to
+01:24:45, like dig to that deeper level Beyond just looking at the history yeah so we
+01:24:51, can do this just a bit of
+01:24:57, fun so that has to be done before you import anthropic so we'll set it to
+01:25:05, debug and so now if we call
+01:25:12, that okay it's tells us everything that's going on and so here is the
+01:25:19, request method post URL headers
+01:25:25, Json data HTTP
+01:25:31, request nice yeah so if we do that
+01:25:40, here so now this is including all of that same information again right because the model on cles on anthropic
+01:25:46, side is not stateful so we pass the full history we can see okay we've still got all of the tools um the like definitions
+01:25:53, in there we've still got the previous messages yeah so this is like it's a bit of a pain to have all this output all of
+01:25:59, the time but if you're playing around with this I'd recommend like turning this on until you can trust that the library does kind of what you want um
+01:26:07, and it's nice to for having that environment variable it's very nice yeah yeah because in the end if you're
+01:26:14, stuck on something then all that's happening is that those pieces of text are being passed over an HTTP connection
+01:26:21, and passed back again so there is nothing else so that's a full
+01:26:26, debug thanks that's a good question jonno so um yeah this is an interesting
+01:26:32, request please cancel all course orders for customer C1 so this is interesting because it
+01:26:39, can't be done in one go so the answer it gave us was okay
+01:26:45, tell me about customer C1 right but that doesn't finish it so
+01:26:51, what actually happens um well I mean we could actually show
+01:26:57, that so if we pass it
+01:27:02, back then it says okay there are two orders let's cancel each one right
+01:27:11, and it has a tool use request right so it's passed back some text and a to use
+01:27:18, request to cancel order 01 it's not being that smart and I think it's
+01:27:23, because we're using hiu if we were using Opus it probably would have had both
+01:27:28, tool use requests in one go well let's find out
+01:27:35, um so if we change this model to model
+01:27:43, zero definitely slower definitely
+01:27:48, slower oh you can see here so this is something interesting that it does it has these um
+01:27:55, thinking blocks that's something that uh Opus in particular
+01:28:00, does [Music] um so then no okay it's still only doing
+01:28:07, one at a time so it's
+01:28:12, fine does it only use those thinking blocks when you use tool use I haven't seen them before when I do API access
+01:28:18, yes okay that's why I haven't seen them as far as I know okay so basically you can see we're going to have to given
+01:28:25, that it's only doing one at time it's going to take at least three gos one to get the information about the customer
+01:28:30, then to cancel order 01 and then to cancel order O2 but each time that we get back a another tool use request we
+01:28:38, should just do it automatically there's no need to manually do this so we've added a thing here called tool
+01:28:45, Loop and for up to 10 steps it'll check whether it's asked for
+01:28:51, motor use and and if
+01:28:57, so it just calls self again that's it just like we just called
+01:29:04, because self is chat right just keeps doing it again and again um optionally I
+01:29:10, added a function that you could like just call for example Trace Funk equals print it'll just print out the request each time and I also added a thing
+01:29:17, called continuation Funk which is whether you want to continue so if you don't if these are both empty then
+01:29:23, nothing happens it's just doing that again and again again so super simple
+01:29:31, function so now if we say can you tell me the email address for customer
+01:29:37, C1 we never have to we never have to do that just does it for us until it's
+01:29:44, finished it says sure there you go it's like okay please cancel all orders for
+01:29:49, customer C1 retrieving cancelling
+01:29:56, now why did it only do O2 oh I think we already canel o1 let's do that
+01:30:03, again there we go so we are agentic are we
+01:30:10, not yes definitely yeah so when people say I've
+01:30:15, made an agent it's like oh congratulations you have a for Loop that CS the thing 10
+01:30:22, times it's not very fancy um but it's like it's nice it's
+01:30:28, like such a simple thing and so now we can ask it like okay how do we go with O2
+01:30:37, again and remember it's got the whole history right so it now can say like oh yeah you told me to cancel it it is
+01:30:43, canceled cool cool um very nice something something I never
+01:30:51, tried um
+01:30:57, is great now cancel
+01:31:04, order6 it should get back false and it should know yeah there we
+01:31:13, go not successful that's good nice so here's a fun
+01:31:20, example let Implement code interpreter just chat GPT because claw doesn't have the code interpreter so now it does um
+01:31:29, so I created this little Library called tools
+01:31:36, LM so we've already used one thing from it which is get
+01:31:42, gamer um which is this little thing here
+01:31:48, um and that's actually got a little example of a python code interpreter there
+01:31:54, um yeah it's also got this little thing called
+01:32:02, shell um so yeah we're going to use that so
+01:32:10, get shell is just a little python interpreter
+01:32:15, um so we're going to create a subass of chat called Cod
+01:32:22, chat um and code chat's going to have one extra method in
+01:32:27, it which is to run code so code to
+01:32:33, execute in a persistent session so this is important to like tell it all this stuff like it's persistent IPython
+01:32:38, session and the result of the expression the last line is what we get back if the
+01:32:43, user declines request to execute then it's
+01:32:50, declined and so you can see here I have this confirmation message so I call
+01:32:55, input with that message and if they say no thank you then I return
+01:33:02, declined um I'd like try to encourage it to actually do complex calculations
+01:33:08, yourself and I have a list of imports that I do automatically so then I can
+01:33:14, that's part of the system prompt you've already got these Imports done and there a little reminder Hau is
+01:33:22, not so smart so I tend to a little bit more verbose about reminding it about things and I wanted to see if it could
+01:33:30, combine um the python tool with other tools so I created a simple little thing here called get user that just returns
+01:33:36, my name um
+01:33:42, so if I do code chat so I'm going to use um Sonet which is like a less stupid than
+01:33:51, Haiku um so in in trying to figure out like how to get hiu to work in fact
+01:33:57, let's use hiu one thing that I found really helped a lot was to give it more examples of
+01:34:03, how things ought to work so I actually just set the history here so I said oh I
+01:34:08, asked you to do this you know
+01:34:14, um sorry I asked you to do this and then you gave me this answer and then I asked
+01:34:19, you to do this and you gave me this answer um
+01:34:29, so so these these aren't like the actual messages that would include the actual like tool calling syntax or anything
+01:34:34, that doesn't I didn't with that text yeah uh it seems to be enough for it to
+01:34:40, know what I'm talking about um yeah if you wanted that full thing I
+01:34:46, guess you could like have this conversation with it and store the history or something like that well um
+01:34:52, I'm going to Ed it so for the for the open AI one I just added today actually something called mock tool use which is
+01:34:59, a function you can call Cuz GPT does care so um we might add the same thing
+01:35:07, here mock tool use and you just pass in the like yeah here's the function you're pretending to call here's the result
+01:35:13, we're pretending that function had um okay
+01:35:22, so create a one line yeah must have broken it at some
+01:35:32, point okay we'll use son it create a oneline function for a string s that
+01:35:38, multiplies together the asky values of each character in s using
+01:35:43, reduce call to loop with that and okay press enter to execute or
+01:35:51, end to skip so that's just coming from this input with this
+01:36:00, message so it's actually if you enter anything at all it'll stop
+01:36:06, um but we'll press
+01:36:11, n okay so it responded with a tool use request to run
+01:36:19, this code um and because it's in the tool
+01:36:25, Loop it did run that code um and it also responded with some text so it's
+01:36:31, responded with both text as well as a to use
+01:36:37, request um and this um doesn't return
+01:36:43, anything print doesn't return anything um so it's all that's happened is that
+01:36:50, behind the scenes we
+01:36:57, um created this interactive python shell called it self. shell self. shell ran
+01:37:04, the code it requested so that shell should now have in it a function called
+01:37:10, check Su so in fact we can have a look at that there's the
+01:37:16, shell and we can even run poing it um so if I just write check some that
+01:37:23, should show it to me
+01:37:29, um result equals function Lambda check [Music]
+01:37:38, some there you go okay so you can play around with The Interpreter yourself so
+01:37:44, you can see it has The Interpreter has now got this function defined and so this is where it gets quite interesting use it to get the check sum of the
+01:37:50, username of this session so it knows that one of the tools it's been told
+01:37:56, exists is get user and in this code chat I automatically
+01:38:02, added um a set tools automatically uh append the self.
+01:38:10, Run cell automatically so it now knows that it can get the user and it can run a cell sorry it can um yeah run a cell so if I
+01:38:18, now call that you can see it's called user found
+01:38:24, out the name's Jeremy then asked to get the check sum of Jeremy there it goes so you can see this is doing a tool use
+01:38:31, with multiple tools including our code interpreter which I think is a
+01:38:37, pretty powerful concept
+01:38:42, actually and if you wanted to see the the actual code it was writing you could change the trace function or look at the
+01:38:48, history or inspect that in some other way yeah so you know we could change to trace function to print for example that
+01:38:55, would so we we've used show contents which is specifically just trying to find the interesting bit if you ATT you
+01:39:01, to print it'll show everything um or yeah you can do whatever you like in that Trace function
+01:39:07, you don't have to show things um and of course we could also set the anthropic
+01:39:12, lobbying debug thing to see all the requests going through um so yeah I know if this needs to
+01:39:19, be um mysterious um yeah so at the end of all
+01:39:24, this we end up with uh a pretty
+01:39:30, convenient uh rapper where and the only thing I bother documenting on the homepage is chat right because I that's
+01:39:37, what 99.9% of people use you just call chat you just pass in the system prompt
+01:39:42, you pass in messages you can use
+01:39:49, tools and you can use images so like the for the US there's not much to know really right
+01:39:57, it's only if you want to mess around making your own code interpreter or trying something that you'd even look a
+01:40:03, little bit deeper um um yeah yeah yeah
+01:40:08, exactly um I don't know what do you I mean I feel like I'm quite excited about
+01:40:14, this way of writing code as being something like
+01:40:19, I feel like I can show you guys like all I did just now was walk through the
+01:40:25, source code of the module mhm you know but in the
+01:40:31, process hopefully you know you might have known it all already but if you didn't you learned something
+01:40:36, about Claude and you know the anthropic API and the react pattern and you know
+01:40:44, blah blah blah you know and yeah I remember I asked you Jon when I first wrote it actually and I said like oh
+01:40:50, could you read this notebook and tell me what you think and you said the next say okay I read The Notebook I now feel
+01:40:55, ready that I could both use and work on the development of this module it's
+01:41:02, like okay that's great right yeah and I think like it definitely depends where
+01:41:07, you're coming from how comfortable you are at those different stages I I think like using it it's it's very nice very
+01:41:12, approachable you get the website with the documentation right there the do the like examples that you use to develop
+01:41:17, the pieces are always useful like examples yeah reading through the source code definitely felt like okay you you
+01:41:23, know I think I could grasp where I needed to make changes like I had to add something for a different project we
+01:41:28, were working on it was okay I think I can see the bits that are important for this um yeah so is quite a fun way to to
+01:41:34, build stuff um I think I think it's quite approachable I think the bit that I'd
+01:41:41, expect people uh might find a little tricky if they haven't seen this sort of thing
+01:41:46, before there two bits one is um you have some kind of personal meta programming
+01:41:54, practices that aren't part of normal python so patching into classes instead of defining in classes liberal use of
+01:42:00, delegates liberal use of uh you know double star keyboard Arun packing stuff like that um and then the second is the
+01:42:09, uh you know not exactly eval but EV valish metaprogramming around interpreting Ian it's using the using
+01:42:16, the symbol table as a dictionary yeah yeah I mean these are all things that you would kind of have in like an
+01:42:22, advanced ith and course they're like for sure they're beyond loops and
+01:42:28, conditionals and um I think they're all things that can
+01:42:34, help people to like create stuff that otherwise might be hard to create or
+01:42:40, might have otherwise required a lot of boiler plate so in general my approach to coding is
+01:42:45, to um yeah not not right stuff that the computer should be able to figure out
+01:42:52, for me and you can take a like you can take the same approach even if you're not quite
+01:42:59, the Jeremy where instead of like importing from Fast core and from you know the tools LM library that you
+01:43:06, written separately it's like oh like often I'll have a utils notebook right which is like oh there's things that are
+01:43:11, completely orthogonal to like what I'm actually doing which is like a tool loop with a chat bot it's like oh I have a
+01:43:16, thing for like getting the a list into a different format or a thing for reading
+01:43:23, files and changing the image type and resizing it to a maximum size um you know you can still have the same idea
+01:43:29, where like here's the main notebook this is me like implementing the pieces one by one maybe there's somewhere else where like oh there's a few utility
+01:43:34, functions that are defined and documented in their own separate place so they don't clutter things up you know this more General like literate notebook
+01:43:42, driven small example Atomic peace driven development doesn't require that you've written the fast core library but it's
+01:43:49, helped Along by having those those pieces at hand yeah and also like in general like Fast core particularly
+01:43:54, fastc core. Basics is designed to be like the things I feel like maybe could
+01:44:00, have been in Python you know like I I almost never write any script or
+01:44:06, notebook without importing from that and without using stuff that because I'm like things that I just think you use
+01:44:13, all the time um I'll say like it's something I've definitely noticed there's two reactions I see to
+01:44:23, people reading my code which you know as you say it's kind of like it's got a
+01:44:28, particular flavor to it um and it's very intentionally not the same as everybody
+01:44:34, else's some people get really angry and they're like why don't you just do everything
+01:44:40, every the same way as everybody else and some people go like wow there's a bunch
+01:44:46, of things here I haven't seen before I'm so excited this is an opportunity to learn those things and so like our
+01:44:52, friend haml in particular you know this happens all the time he's just like oh I was just reading your source code to
+01:44:57, that thing you did and I learned about this whole thing that's really helpful so I don't mind people can react in
+01:45:04, either way stage in the video there likely in the second class
+01:45:11, probably they would given up long ago I think also star star fuck. ars no if
+01:45:18, people have other if people can relate it to things in other languages and it doesn't seem so alien like every time you do patch I'm just like okay it's a
+01:45:24, swift extension or every time you you know there like a lot of these things have analogies in other yeah it's exactly Swift extension or in Ruby they
+01:45:31, even call it monkey patching yeah but because it's like not built into the standard Library some python programmers
+01:45:37, are like no you're not allowed to use the dynamic features of this Dynamic
+01:45:44, language that were created to make it Dynamic anyo yeah nice so cool thank you
+01:45:50, jery I think this is hopefully this is like the uh the ultra in-depth if you if you were reading the source code and you
+01:45:56, wanted more I think you got all all the more you could want um yeah hopefully we
+01:46:01, we might try and do these for a few other projects as well um work through the backlog of the little side things that haven't really been documented but
+01:46:08, um yeah is there anything else you wanted to add for this or like introduce this series I
+01:46:13, guess I mean series is probably too grander word you know I think it's just
+01:46:20, like from my point of view I wanted an opportunity to uh mainly to hear from other folks at
+01:46:30, answer. were about their work and so partly this is like my cunning plan is
+01:46:35, to like if I do one maybe other people will feel some social pressure to do the same thing and they will then get to
+01:46:42, learn more about their work um and Alexis and I have had a similar conversation and he's promised to teach
+01:46:48, me about some of his work um soon as well so hopefully that be that will be happening soon and you know
+01:46:56, also I think you know in
+01:47:01, general answer. is a public benefit cooperation and hopefully this is
+01:47:07, something that provides some level of public benefit to at least some people is there's no re like in a normal
+01:47:13, company this is probably something that would be a private secret password protected internal series and here it's
+01:47:20, like no there no need to do that other people can benefit too if they if
+01:47:25, they want to um any of you have anything else to
+01:47:31, add to to that my one thought is uh I think these
+01:47:37, are a good idea and I think we should also explore the full range of durations so you know it's good to do deep Dives
+01:47:43, on something that has depth to it it's also good to do shallow Dives uh on something that is uh you know quick and
+01:47:51, might be trivial to the person who explaining it but is totally unfamiliar and therefore you know high value to the
+01:47:56, person who hasn't seen it before and we can put those ones on Tik Tok too yes there we go let's let's let's
+01:48:02, see who achieves the first Tik Tok like the explainer awesome thanks so thanks
+01:48:09, everybody well done bye sure bye thanks

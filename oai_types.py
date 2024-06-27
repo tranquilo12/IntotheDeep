@@ -1,12 +1,14 @@
 import base64
 import json
-import logging
 from typing import Dict, List, Literal, Optional, Tuple, Union
 from uuid import uuid4
 
 import aiohttp
+import chainlit as cl
 import tiktoken
 from litellm import acompletion
+from litellm.types.utils import Delta, ModelResponse
+from openai.types.chat.chat_completion_message import ChatCompletionMessageToolCall
 from pydantic import BaseModel, Field, computed_field
 
 from models import ModelNames
@@ -142,7 +144,7 @@ class User(BaseModel):
 
 
 class FunctionCallContent(BaseModel):
-    type: Literal["function_call"] = "function_call"
+    type: Literal["tool_call"] = "tool_call"
     name: str  # The name of the function to call
     arguments: str  # JSON-formatted arguments for the function
     tool_call_id: Optional[str] = None  # Add the tool_call_id field
@@ -172,6 +174,97 @@ class System(BaseModel):
 
     def __init__(self, msg: str, **data):
         super().__init__(content=TextContent(text=msg), **data)
+
+
+#############################################
+########## Chainlit Event handler ###########
+#############################################
+class ChainlitEventHandler:
+    def __init__(self, conversation: "Conversation"):
+        self.conversation: Conversation = conversation
+        self.current_step: Optional[cl.Step] = None
+        self.streaming_response: Optional[cl.Message] = None
+        self.current_tool_call = None
+        self.function_call_made = None
+
+    async def handle_chunk(self, chunk: ModelResponse):
+        delta: Delta = chunk.choices[0].delta
+        finish_reason: Optional[str] = chunk.choices[0].finish_reason
+
+        if delta.content is not None:
+            await self.handle_content(delta.content, finish_reason)
+        elif delta.tool_calls:
+            # We're just sending one tool here (execute_code_locally)
+            # TODO: Ensure this is made into a parallel function call later.
+            if finish_reason is not None:
+                print(f"{finish_reason=}")
+
+            await self.handle_tool_call(delta.tool_calls[0], finish_reason)
+
+        if finish_reason:
+            await self.handle_finish(finish_reason)
+
+    async def handle_content(self, content: str, finish_reason: Optional[str]):
+        if self.streaming_response is None:
+            self.streaming_response = cl.Message("")
+            await self.streaming_response.send()
+        await self.streaming_response.stream_token(content)
+        if finish_reason:
+            await self.conversation.add_assistant_msg(
+                content=TextContent(text=self.streaming_response.content)
+            )
+
+    async def handle_tool_call(
+        self, tool_call: ChatCompletionMessageToolCall, finish_reason: Optional[str]
+    ):
+        self.function_call_made = True
+
+        if self.current_tool_call is None:
+            self.current_tool_call = FunctionCallContent(
+                name=tool_call.function.name, arguments=tool_call.function.arguments
+            )
+            self.current_step = cl.Step(type="tool", name=self.current_tool_call.name)
+            await self.current_step.send()
+
+        if tool_call.function.arguments:
+            self.current_tool_call.arguments += tool_call.function.arguments
+            await self.current_step.stream_token(
+                tool_call.function.arguments, is_input=True
+            )
+
+        if finish_reason:
+            await self.execute_function()
+
+    async def execute_function(self):
+        try:
+            code = json.loads(self.current_tool_call.arguments)["code"]
+        except ValueError as _:
+            code = self.current_tool_call.arguments
+
+        if self.current_tool_call.name in [
+            "execute_code_locally",
+            "python",
+            "functions",
+        ]:
+            async for result_chunk in execute_code_locally(
+                code, self.conversation.interpreter
+            ):
+                if isinstance(result_chunk, CodeExecutionContent):
+                    self.current_step.output = result_chunk.text
+                    await self.conversation.add_assistant_msg(content=result_chunk)
+
+        if _ := await self.current_step.update():
+            self.current_tool_call = None
+
+    async def handle_finish(self, finish_reason: str):
+        if finish_reason and self.current_tool_call:
+            await self.execute_function()
+        elif self.streaming_response and not self.function_call_made:
+            await self.conversation.add_assistant_msg(
+                content=TextContent(text=self.streaming_response.content)
+            )
+        if self.streaming_response:
+            await self.streaming_response.update()
 
 
 #############################################
@@ -215,7 +308,7 @@ class Conversation(BaseModel):
             for m in self.messages_
         ]
 
-    def __payload__(self, max_tokens: int, stream: bool) -> dict:
+    def __payload__(self, max_tokens: int) -> dict:
         tool = {
             "type": "function",
             "function": {
@@ -237,7 +330,7 @@ class Conversation(BaseModel):
             "model": self.model,
             "temperature": 0.3,
             "messages": self.__to_dict__(),
-            "stream": stream,
+            "stream": True,
             "max_tokens": max_tokens,
             "tools": [tool],
             "tool_choice": "auto",
@@ -248,8 +341,10 @@ class Conversation(BaseModel):
 
     async def add_assistant_msg(
         self,
-        content: Union[TextContent, CodeExecutionContent, FunctionCallContent] = None,
-        **kwargs,  # Additional keyword arguments for Assistant (e.g., name, tool_call_id)
+        content: Optional[
+            Union[TextContent, CodeExecutionContent, FunctionCallContent]
+        ] = None,
+        **kwargs,  # (e.g., name, tool_call_id)
     ) -> None:
         """
         Adds an assistant message to the conversation with flexible content types.
@@ -259,72 +354,15 @@ class Conversation(BaseModel):
         content: The content of the assistant's message. Can be TextContent, CodeExecutionContent, or FunctionCallContent.
         **kwargs: Additional keyword arguments to pass to the Assistant constructor (e.g., name, tool_call_id).
         """
-
         if content is None:
             raise ValueError("Content must be provided.")
 
         assistant_message = Assistant(content=content, **kwargs)
         self.__append__(assistant_message)
 
-    async def call_llm(self, max_tokens: int, stream: bool = False):
+    async def call_llm(self, max_tokens: int, event_handler: ChainlitEventHandler):
         """Calls the LLM, handles responses, and manages tool calls."""
-        try:
-            response = await acompletion(**self.__payload__(max_tokens, stream))
-
-            if stream:
-                current_tool_call = None
-                async for chunk in response:
-                    delta = chunk.choices[0].delta
-                    finish_reason = chunk.choices[0].finish_reason
-
-                    # If nothing is received, continue the loop
-                    if delta is None:
-                        continue
-
-                    # Handle tool calls
-                    if delta.tool_calls:
-                        tool_call_info = delta.tool_calls[0]
-
-                        if current_tool_call is None:
-                            current_tool_call = FunctionCallContent(
-                                name=tool_call_info.function.name or "",
-                                arguments="",
-                                tool_call_id=tool_call_info.id,
-                            )
-
-                        if tool_call_info.function.arguments:
-                            current_tool_call.arguments += (
-                                tool_call_info.function.arguments
-                            )
-
-                    # Handle regular content
-                    elif delta.content:
-                        yield delta.content, finish_reason
-
-                    # Handle finish conditions
-                    if finish_reason == "tool_calls":
-                        if current_tool_call:
-                            yield current_tool_call, finish_reason
-                            current_tool_call = None
-                    elif finish_reason:
-                        if current_tool_call:
-                            yield current_tool_call, "tool_calls"
-                            current_tool_call = None
-                        else:
-                            yield None, finish_reason
-
-            else:  # Non-streamed response
-                message = response.choices[0].message
-                if message.tool_calls:
-                    tool_call = message.tool_calls[0]
-                    yield FunctionCallContent(
-                        name=tool_call.function.name,
-                        arguments=tool_call.function.arguments,
-                        tool_call_id=tool_call.id,
-                    ), "tool_calls"
-                else:
-                    yield message.content, "stop"
-
-        except Exception as e:
-            logging.exception(f"Error in call_llm: {e}")
-            raise
+        payload = self.__payload__(max_tokens=max_tokens)
+        response = await acompletion(**payload)
+        async for chunk in response:
+            await event_handler.handle_chunk(chunk)

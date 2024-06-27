@@ -10,10 +10,10 @@ from dotenv import load_dotenv
 
 from models import ModelNames
 from oai_types import (
+    ChainlitEventHandler,
     CodeExecutionContent,
     Conversation,
     FunctionCallContent,
-    TextContent,
     execute_code_locally,
 )
 from utils import init_convo
@@ -50,7 +50,7 @@ async def call_tool(tool_call: FunctionCallContent, finish_reason: str):
     await current_step.stream_token(token=tool_call.arguments, is_input=True)
 
     CONVO = cl.user_session.get("CONVO")
-    if finish_reason == "tool_calls":
+    if finish_reason == "tool_call":
         cl.user_session.set(f"accumulated_args_{tool_call_id}", None)  # Clear arguments
         try:
             args = json.loads(accumulated_args)
@@ -82,37 +82,27 @@ async def run_conversation(max_tokens: int = 4000):
     ----------
     max_tokens : int, It's always the max.
     """
-    global TOTAL_TOKENS
     CONVO: Conversation = cl.user_session.get("CONVO")
+    BEFORE: int = CONVO.total_tokens
+    tokens_used = cl.Text(
+        name="Tokens Used", content=f"Tokens Used: {str(BEFORE)}", display="inline"
+    )
 
-    while True:
-        BEFORE = CONVO.total_tokens
-        tokens_used = cl.Text(content=str(BEFORE), name="Tokens used")
-        llm_response = CONVO.call_llm(max_tokens=max_tokens, stream=True)
+    event_handler = ChainlitEventHandler(CONVO)
+    await CONVO.call_llm(max_tokens=max_tokens, event_handler=event_handler)
 
-        streaming_response = cl.Message(content="", elements=[tokens_used])
-        await streaming_response.send()
+    AFTER: int = CONVO.total_tokens
+    tokens_gen = cl.Text(
+        name="Tokens Generated",
+        content=f"Tokens Generated: {str(AFTER - BEFORE)}",
+        display="inline",
+    )
 
-        complete_str_resp = ""
-        async for chunk, finish_reason in llm_response:
-            if isinstance(chunk, FunctionCallContent):
-                await call_tool(chunk, finish_reason)
+    if event_handler.streaming_response:
+        event_handler.streaming_response.elements = [tokens_used, tokens_gen]
+        await event_handler.streaming_response.update()
 
-            elif isinstance(chunk, str):
-                await streaming_response.stream_token(chunk)
-                complete_str_resp += chunk
-
-                if finish_reason is not None:
-                    content = TextContent(text=complete_str_resp)
-                    await CONVO.add_assistant_msg(content=content)
-
-        cl.user_session.set("CONVO", CONVO)
-
-        AFTER = CONVO.total_tokens
-        tokens_gen = cl.Text(content=str(AFTER - BEFORE), name="Tokens Generated")
-        streaming_response.elements = [tokens_used, tokens_gen]
-        await streaming_response.update()
-        break
+    cl.user_session.set("CONVO", CONVO)
 
 
 @cl.on_chat_start
@@ -124,7 +114,7 @@ async def on_chat_start():
     model_selection = await cl.AskActionMessage(
         content="Please select a model to use for this conversation:",
         actions=[
-            cl.Action(name="model", value=model.value, label=model.value)
+            cl.Action(name="model", value=model.value, label=model.value)  # type: ignore
             for model in ModelNames
         ],
     ).send()
