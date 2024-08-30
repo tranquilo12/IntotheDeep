@@ -1,194 +1,341 @@
-"""
-Something cool here
-"""
-
-import json
-from typing import Dict
+from typing import Any, List, Optional, Union
 
 import chainlit as cl
+from chainlit.input_widget import Select, Switch
+from chainlit.types import AskFileResponse
 from dotenv import load_dotenv
 
+from eventhandler import ChainlitEventHandler
 from models import ModelNames
-from oai_types import (
-    ChainlitEventHandler,
-    CodeExecutionContent,
-    Conversation,
-    FunctionCallContent,
-    execute_code_locally,
-)
-from utils import init_convo
+from oai_types import Conversation, Dict, System, User
+
+
+@cl.password_auth_callback
+def auth_callback(username: str, password: str):
+    """
+    Authenticate the user based on username and password.
+
+    Parameters
+    ----------
+    username : str
+        The username of the user.
+    password : str
+        The password of the user.
+
+    Returns
+    -------
+    cl.User or None
+        Returns a `cl.User` object if authentication is successful, otherwise None.
+    """
+    valid_users = {
+        "anya": {"password": "jasthi", "role": "user"},
+        "shriram": {"password": "sunder", "role": "user"},
+    }
+
+    if username in valid_users and password == valid_users[username]["password"]:
+        return cl.User(
+            identifier=username,
+            metadata={"role": valid_users[username]["role"], "provider": "credentials"},
+        )
+    else:
+        return None
+
+
+# Global variable to store the file actions message
+file_actions_message = None
+file_mapping: Dict[str, str] = {}  # Maps anonymized filenames to actual filenames
 
 load_dotenv()
 
-# Global variable to track token count across sessions (optional)
-TOTAL_TOKENS: int = 0
+
+def init_convo(
+    model_name: str,
+    context_code: Union[str, Any],
+    user_question: str,
+) -> Conversation:
+    """
+    Initialize a conversation with the given parameters.
+
+    Parameters
+    ----------
+    model_name : str
+        The name of the model to use for the conversation.
+    context_code : Union[str, Any]
+        The context code to provide to the model.
+    user_question : str
+        The user's question to start the conversation.
+
+    Returns
+    -------
+    Conversation
+        The initialized conversation object.
+    """
+    system_message_base = "".join(
+        [
+            "You are a helpful assistant equipped to handle multistep questions by using relevant functions. Follow a strict pattern:\n",
+            "THOUGHT: Think step-by-step about which relevant function to call to progress towards the final answer.\n",
+            "ACTION: Call a relevant function as the next step toward solving the problem, using arguments provided verbatim by the user or from the output of previous functions.\n"
+            "OBSERVATION: Report the output of the function.\n",
+            "Always prioritize calling a relevant function whenever applicable. If the query does not require function calling, respond appropriately to the user query",
+            "The data is located within the /wta_training/data directory within the docker container that you're operating within.",
+        ]
+    )
+
+    user_message_base = "\n\n".join(
+        [
+            f"""Here is the code I have so far, in between the "```python" and "```" tags:""",
+            f"""```python\n{context_code if context_code is not None else "There is no code Provided"}\n```""",
+            """And here is my question about the code below: """,
+            f"""```text\n{user_question}\n```""",
+        ]
+    )
+
+    return Conversation(
+        model_name=model_name,
+        messages_=[
+            System(system_message_base),
+            User(user_message_base),
+        ],
+        hist_path="chat_log.json",
+        code_path="code_blocks.json",
+    )
 
 
 #############################################
 ########## Helper Functions (Convo) #########
 #############################################
-@cl.step(type="tool", show_input=False)
-async def call_tool(tool_call: FunctionCallContent, finish_reason: str):
-    """
-    Just for calling tools...
-
-    Parameters
-    ----------
-    tool_call : FunctionCallContent, The content from the
-    finish_reason : str,
-    """
-    current_step = cl.context.current_step
-    function_name = tool_call.name
-    current_step.name = function_name
-    current_step.input = None
-    # current_step.language = "json"
-
-    # Accumulate arguments
-    tool_call_id = tool_call.tool_call_id
-    accumulated_args = cl.user_session.get(f"accumulated_args_{tool_call_id}", "")
-    accumulated_args += tool_call.arguments
-    await current_step.stream_token(token=tool_call.arguments, is_input=True)
-
-    CONVO = cl.user_session.get("CONVO")
-    if finish_reason == "tool_call":
-        cl.user_session.set(f"accumulated_args_{tool_call_id}", None)  # Clear arguments
-        try:
-            args = json.loads(accumulated_args)
-        except json.decoder.JSONDecodeError as _:
-            # check if there's ```python tags and then execute the code.
-            code = accumulated_args.lstrip("```python").rstrip("```")
-            args = {"code": code}
-
-        # Execute the tool and stream results
-        if function_name == "execute_code_locally":
-            async for result_chunk in execute_code_locally(
-                args["code"], CONVO.interpreter
-            ):
-                if isinstance(result_chunk, CodeExecutionContent):
-                    current_step.output = result_chunk.text
-                    await CONVO.add_assistant_msg(content=result_chunk)
-        else:
-            raise NotImplementedError(f"Function {function_name} not implemented.")
-
-    await current_step.send()
-
-
-# noinspection PyArgumentList
 async def run_conversation(max_tokens: int = 4000):
     """
-    Run the convo! Send to the LLM!
+    Run the conversation with the specified maximum tokens.
 
     Parameters
     ----------
-    max_tokens : int, It's always the max.
+    max_tokens : int, optional
+        The maximum number of tokens to use for the conversation (default is 4000).
     """
     CONVO: Conversation = cl.user_session.get("CONVO")
-    BEFORE: int = CONVO.total_tokens
-    tokens_used = cl.Text(
-        name="Tokens Used", content=f"Tokens Used: {str(BEFORE)}", display="inline"
-    )
 
-    event_handler = ChainlitEventHandler(CONVO)
+    event_handler: ChainlitEventHandler = ChainlitEventHandler(CONVO)
     await CONVO.call_llm(max_tokens=max_tokens, event_handler=event_handler)
 
-    AFTER: int = CONVO.total_tokens
-    tokens_gen = cl.Text(
-        name="Tokens Generated",
-        content=f"Tokens Generated: {str(AFTER - BEFORE)}",
-        display="inline",
-    )
+    last_chat_message = CONVO.messages[-1]
+    # Log the chat message
+    CONVO.log_chat_message(last_chat_message.content.text)
 
-    if event_handler.streaming_response:
-        event_handler.streaming_response.elements = [tokens_used, tokens_gen]
-        await event_handler.streaming_response.update()
+    # Extract and append code from the chat message
+    CONVO.extract_and_append_code(last_chat_message.content.text)
 
+    # Ensure the conversation is updated in the user session
     cl.user_session.set("CONVO", CONVO)
+
+
+async def generate_settings(
+    preset_model: str, actual_filenames: List[str]
+) -> Dict[str, str]:
+    """
+    Generate chat settings based on the preset model and actual filenames.
+
+    Parameters
+    ----------
+    preset_model : str
+        The preset model to use for the settings.
+    actual_filenames : List[str]
+        The list of actual filenames.
+
+    Returns
+    -------
+    Dict[str, str]
+        The generated settings as a dictionary.
+    """
+    return await cl.ChatSettings(
+        [
+            Select(
+                id="Model",
+                label="OpenAI - Model",
+                values=ModelNames.all_to_list(),
+                initial_value=preset_model,
+            ),
+            Select(
+                id="File Removal",
+                label="Remove Files",
+                values=(
+                    ["Please attach files"]
+                    if not actual_filenames
+                    else actual_filenames
+                ),
+            ),
+            Switch(id="Download Chat", label="Download Chat History", initial=False),
+        ]
+    ).send()
 
 
 @cl.on_chat_start
 async def on_chat_start():
     """
-    All things that happen when you're about to start convo.
+    Handle the chat start event by initializing the conversation and settings.
     """
-    # Ask the user to select a model before initializing the conversation
-    model_selection = await cl.AskActionMessage(
-        content="Please select a model to use for this conversation:",
-        actions=[
-            cl.Action(name="model", value=model.value, label=model.value)  # type: ignore
-            for model in ModelNames
-        ],
+    global file_mapping
+
+    preset: Dict[str, str] = await cl.ChatSettings(
+        [
+            Select(
+                id="Model",
+                label="OpenAI - Model",
+                values=ModelNames.all_to_list(),
+                initial_value=ModelNames.AZURE_GPT_35_TURBO.value,
+            ),
+        ]
     ).send()
 
-    if model_selection is None:
-        await cl.Message(content="No model selected. Using default model.").send()
-        selected_model = ModelNames.GPT_3_5_TURBO.value
-    else:
-        selected_model = model_selection["value"]
+    files: List[AskFileResponse] | None = await cl.AskFileMessage(
+        content="Please upload python files only.",
+        accept={
+            "text/plain": [
+                ".txt",
+                ".py",
+                ".env",
+                ".html",
+                ".css",
+                ".js",
+                ".csv",
+                ".ipynb",
+                ".json",
+            ]
+        },
+        max_size_mb=10,
+        timeout=240,
+        max_files=10,
+    ).send()
 
-    # Now we can use the selected model when initializing the conversation
-    first_msg: cl.types.StepDict | None = await cl.AskUserMessage(
-        content="What do you want to do?",
-        type="assistant_message",
+    all_code = []
+    file_paths = []
+    file_mapping = {}  # Reset file_mapping
+    for py_f in files:
+        with open(py_f.path, "r", encoding="utf-8") as f:
+            code = f.read()
+            formatted_code = f"### filename: {py_f.name} ###\n\n{code}\n\n###"
+            all_code.append(formatted_code)
+            file_paths.append(py_f.path)
+            file_mapping[py_f.path] = (
+                py_f.name
+            )  # Map anonymized path to actual filename
+
+    first_msg: Optional[cl.Message] = await cl.AskUserMessage(
+        content="What do you want to do with these uploaded files?",
         timeout=60,
     ).send()
 
+    actual_filenames = []
+    for actual_filename in file_mapping.values():
+        actual_filenames.append(actual_filename)
+    preset_model = preset["Model"]
+    settings: Dict[str, str] = await generate_settings(preset_model, actual_filenames)
     if first_msg:
         CONVO: Conversation = init_convo(
-            context_code="No code provided, ignore.",
-            user_question=first_msg["output"],
-            model_name=selected_model,  # Use the selected model here
+            model_name=settings["Model"],
+            context_code="".join(all_code),
+            user_question=first_msg["output"],  # type: ignore
         )
-
-        # Cache the updated conversation
+        CONVO.files = file_paths
         cl.user_session.set("CONVO", CONVO)
+        CONVO.init_log()
+        first_user_message = first_msg["output"]
+        CONVO.log_user_message(first_user_message)
 
-        # Let's start the conversation
         await run_conversation()
-
-
-@cl.on_settings_update
-async def on_settings_update(settings: Dict):
-    """
-    For all settings update
-
-    Parameters
-    ----------
-    settings : Dict
-    """
-    # Get cached object
-    CONVO: Conversation = cl.user_session.get("CONVO")
-
-    # Update the conversation's model name
-    CONVO.model = settings["Model"]
-
-    # Cache the updated conversation, before you probe_llm, cause async magic
-    cl.user_session.set("CONVO", CONVO)
 
 
 @cl.on_message
 async def on_message(message: cl.Message):
     """
-    What's going to happen AFTER you've started the convo, and will send a message now.
+    Handle incoming messages and update the conversation.
 
     Parameters
     ----------
-    message : cl.Message, Being received from the user.
+    message : cl.Message
+        The incoming message to handle.
+    """
 
-    Returns
-    -------
-    None
+    CONVO: Conversation = cl.user_session.get("CONVO")
+    # Check if there are any files attached to the message
+    if message.elements:
+        # Filter for .py files
+        py_files = [file for file in message.elements if file.name.endswith(".py")]
+
+        # If there are .py files, read their content
+        if py_files:
+            for py_file in py_files:
+                with open(py_file.path, "r", encoding="utf-8") as f:
+                    CONVO.add_user_msg(
+                        f"Contents of `{py_file.name}`:\n\n```python\n{f.read()}\n```"
+                    )
+
+    CONVO.add_user_msg(message.content)
+    CONVO.log_chat_message(message.content)
+    cl.user_session.set("CONVO", CONVO)
+    await run_conversation()
+
+
+async def reset_settings():
+    """
+    Reset the chat settings based on the current conversation.
+    """
+    actual_filenames = []
+    for actual_filename in file_mapping.values():
+        actual_filenames.append(actual_filename)
+    CONVO: Conversation = cl.user_session.get("CONVO")
+    preset_model = CONVO.model_name
+    await generate_settings(preset_model, actual_filenames)
+
+
+@cl.on_settings_update
+async def on_settings_update(settings):
+    """
+    Handle settings update events and update the conversation settings.
+
+    Parameters
+    ----------
+    settings : dict
+        The updated settings.
     """
     # Get cached object
     CONVO: Conversation = cl.user_session.get("CONVO")
 
-    # Ingest user message
-    CONVO.add_user_msg(msg=message.content)
+    if CONVO is not None:
+        # Update the conversation's model name
+        CONVO.model_name = settings["Model"]
+        # Cache the updated conversation, before you probe_llm, cause async magic
+        cl.user_session.set("CONVO", CONVO)
 
-    # Cache the updated conversation, before you probe_llm, cause async magic
-    cl.user_session.set("CONVO", CONVO)
+    if settings.get("Download Chat"):
+        file = cl.File(
+            name="chat_log.json", path="./chat_log.json", mime="application/json"
+        )
 
-    # Probe llm
-    await run_conversation()
+        await cl.Message(
+            content="Here's your conversation history. Click to download!",
+            elements=[file],
+        ).send()
+        await reset_settings()
+
+    if settings.get("File Removal"):
+        selected_file = settings["File Removal"]
+        if selected_file not in file_mapping.values():
+            return
+        else:
+            actual_filename = selected_file
+            for anonymized, actual in file_mapping.items():
+                if actual == actual_filename:
+                    anonymized_filename = anonymized
+
+            CONVO: Conversation = cl.user_session.get("CONVO")
+            CONVO.remove_file(anonymized_filename)
+            del file_mapping[anonymized_filename]
+            cl.user_session.set("CONVO", CONVO)
+            await cl.Message(
+                f"File '{actual_filename}' removed from the conversation context."
+            ).send()
+            await reset_settings()
 
 
 if __name__ == "__main__":

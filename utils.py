@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from pathlib import PosixPath, WindowsPath
-from typing import Any, List, Optional, Union
+from typing import List, Optional, Union, Tuple
 
 from dotenv import load_dotenv
 from git import GitCommandError, Repo
@@ -20,18 +20,22 @@ load_dotenv()
 #############################################
 ## For all generic utils functions
 #############################################
+
+
 def str_to_path(path: str | List) -> Optional[WindowsPath | PosixPath]:
     """
-    Convert a string to a path object, based on the OS
+    Convert a string or list of strings to a path object, based on the OS.
+
     Parameters
     ----------
-    path: str | List
+    path : Union[str, List[str]]
+        The string or list of strings to convert to a path object.
 
     Returns
     -------
-    Optional[WindowsPath | PosixPath]
+    Optional[Union[WindowsPath, PosixPath]]
+        The corresponding path object based on the OS, or None if the input is invalid.
     """
-
     if isinstance(path, list):
         if sys.platform == "win32":
             path = WindowsPath("\\\\".join(path))
@@ -47,63 +51,6 @@ def str_to_path(path: str | List) -> Optional[WindowsPath | PosixPath]:
 
 
 #############################################
-## For all the conversation related functions
-## Includes the OpenAI and Anthropic API calls
-#############################################
-def init_convo(
-    model_name: str,
-    context_code: Union[str, Any],
-    user_question: str,
-) -> Conversation:
-    """
-    Get the starting conversation for the assistant
-
-    Parameters
-    ----------
-    model_name: str
-            The name of the model if you don't want the default value = gpt-3.5-turbo
-    context_code : str
-            Code provided by the user
-    user_question : str
-            Question provided by the user
-
-    Returns
-    -------
-    Conversation
-            Starting conversation for the assistant
-    """
-
-    # Append the system message with a list of rules that are common to both
-    system_message_base = "".join(
-        [
-            "You are #1 on the Stack Overflow community leaderboard. ",
-            "Do not tell me that you're not capable of solving the problem. ",
-            "You will figure a way out to solve the problem. ",
-            "If you're asked to generate code, do so within the '```python' '```' markdown tags, as they'll be "
-            "extracted into a JSON structure.",
-        ]
-    )
-
-    user_message_base = "\n\n".join(
-        [
-            f"""Here is the code I have so far, in between the "```python" and "```" tags:""",
-            f"""```python\n{context_code if context_code is not None else "There is no code Provided"}\n```""",
-            """And here is my question about the code below: """,
-            f"""```text\n{user_question}\n```""",
-        ],
-    )
-
-    # Create the conversation object
-    return Conversation(
-        model=model_name,
-        messages_=[
-            System(system_message_base),
-            User(user_message_base),
-        ],
-    )
-
-
-#############################################
 ## For all the git related functions
 #############################################
 class GitFileDiff(BaseModel):
@@ -115,52 +62,90 @@ class AllGitFileDiffs(BaseModel):
     diffs: List[GitFileDiff]
 
 
-def get_latest_changes_within_git(root_path: str | os.PathLike) -> List[GitFileDiff]:
+def get_latest_changes(root_path: str | os.PathLike) -> Tuple[List[GitFileDiff], str]:
     """
-    Get the latest changes within a git repository
+    Get the latest changes within a git repository.
 
     Parameters
     ----------
-    root_path : str
-            Path to the git repository
+    root_path : Union[str, os.PathLike]
+        Path to the git repository.
 
     Returns
     -------
-    AllGitFileDiffs
-            Latest changes within the git repository
+    Tuple[List[GitFileDiff], str]
+        A tuple containing the original diffs and their summaries.
     """
     root_path = str_to_path(root_path)
     try:
-        repo = Repo(root_path)  # type: ignore
+        repo = Repo(root_path)
     except GitCommandError:
         raise ValueError("Invalid Git repository path")
 
     diffs = []
+    summaries = []
     staged_files = [item.a_path for item in repo.index.diff("HEAD")]
 
     for file in staged_files:
         try:
             diff = repo.git.diff("HEAD", file)
+            summary = summarize_diff(diff)
             diffs.append(GitFileDiff(filepath=file, diff=diff))
+            summaries.append(f"{file}: {summary}")
         except GitCommandError:
             pass
 
-    return diffs
+    summary_text = "\n".join(summaries)
+    return diffs, summary_text
 
 
-def get_git_commit_prompt(diff: GitFileDiff) -> Conversation:
+def summarize_diff(diff: str) -> str:
     """
-    Get the git commit prompt
+    Generate a human-readable summary of the diff.
 
     Parameters
     ----------
-    diff : AllGitFileDiffs
-            All the git file diffs
+    diff : str
+        A string representing the diff output.
+
+    Returns
+    -------
+    str
+        A string containing a summary of the changes in the diff.
+    """
+    lines = diff.splitlines()
+    added = sum(
+        1 for line in lines if line.startswith("+") and not line.startswith("+++")
+    )
+    removed = sum(
+        1 for line in lines if line.startswith("-") and not line.startswith("---")
+    )
+    modified = len(lines) - added - removed
+
+    description = []
+    if added:
+        description.append(f"{added} lines added")
+    if removed:
+        description.append(f"{removed} lines removed")
+    if modified:
+        description.append(f"{modified} lines modified")
+
+    return ", ".join(description) if description else "No changes detected"
+
+
+def get_git_commit(diff: GitFileDiff) -> Conversation:
+    """
+    Get the git commit prompt.
+
+    Parameters
+    ----------
+    diff : GitFileDiff
+        The git file diff.
 
     Returns
     -------
     Conversation
-            Git commit prompt
+        Git commit prompt.
     """
     # Start the system message with a list of rules, it will be further
     # appended depending on the code_only flag
@@ -181,7 +166,7 @@ def get_git_commit_prompt(diff: GitFileDiff) -> Conversation:
         "\n\n".join(
             [
                 f"Here is the git diff structure between the <gitDiff></gitDiff> tags: ",
-                f"<gitDiff>{diff.model_dump_json()}</gitDiff>",
+                f"<gitDiff>{diff}</gitDiff>",
                 "Give me a very comprehensive git commit message, in markdown. ",
                 "Explain the benefits of the changes, and the drawbacks of the changes. ",
                 "If they're just formatting changes, then say so, be succinct when needed. ",
