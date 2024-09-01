@@ -6,13 +6,13 @@ import json
 import os
 import sys
 from pathlib import PosixPath, WindowsPath
-from typing import List, Optional, Union, Tuple
+from typing import List, Optional, Tuple, Union
 
 from dotenv import load_dotenv
 from git import GitCommandError, Repo
 from pydantic import BaseModel
 
-from oai_types import Conversation, System, User
+from llm_types import Conversation, System, User
 
 load_dotenv()
 

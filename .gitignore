@@ -1,8 +1,10 @@
-/.DS_Store
-/.env
-/.vscode
-/.venv
-/__init__.py
-/__pycache__
-/.files/
+__pycache__/
+.chainlit/
+.files/
 .idea/
+.venv/
+.vscode/
+.DS_Store/
+.promptflow/
+.env
+__init__.py

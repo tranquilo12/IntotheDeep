@@ -10,7 +10,6 @@ import tiktoken
 from litellm import acompletion
 from pydantic import BaseModel, Field, computed_field
 
-from eventhandler import ChainlitEventHandler
 from models import ModelNames
 
 
@@ -45,7 +44,35 @@ class Interpreter(BaseModel):
                 return result["stdout"], result["stderr"]
 
 
-class CodeExecutionContent(BaseModel):
+def get_token_count(text: str, model_name: str) -> int:
+    model_type = ModelNames.get_model_type(model_name)
+
+    if model_type == "OPENAI" or model_type == "GGUF":
+        encoding = tiktoken.encoding_for_model(
+            "gpt-3.5-turbo" if "35" in model_name else "gpt-4"
+        )
+        return len(encoding.encode(text))
+    elif model_type == "ANTHROPIC":
+        encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
+        return len(encoding.encode(text))
+    else:
+        raise ValueError(f"Unknown model type: {model_name}")
+
+
+class BaseModelsTokenCount(BaseModel):
+    @property
+    def tokens(self) -> int:
+        """
+        Calculate the number of tokens in the generated Markdown text.
+        Returns
+        -------
+        int
+            The number of tokens.
+        """
+        return get_token_count(self.text, self.model_name)
+
+
+class CodeExecutionContent(BaseModelsTokenCount):
     type: Literal["code_execution"] = "code_execution"
     code: str  # The executed code
     stdout: Optional[str] = None  # Standard output from execution
@@ -72,42 +99,10 @@ class CodeExecutionContent(BaseModel):
 
         return markdown_text
 
-    def tokens(self, enc: tiktoken.Encoding) -> int:
-        """
-        Calculate the number of tokens in the generated Markdown text.
 
-        Parameters
-        ----------
-        enc : tiktoken.Encoding
-            The encoding to use for token counting.
-
-        Returns
-        -------
-        int
-            The number of tokens.
-        """
-        return len(enc.encode(self.text))
-
-
-class TextContent(BaseModel):
+class TextContent(BaseModelsTokenCount):
     type: Literal["text"] = "text"
     text: str
-
-    def tokens(self, enc: tiktoken.Encoding) -> int:
-        """
-        Calculate the number of tokens in the text.
-
-        Parameters
-        ----------
-        enc : tiktoken.Encoding
-            The encoding to use for token counting.
-
-        Returns
-        -------
-        int
-            The number of tokens.
-        """
-        return len(enc.encode(self.text))
 
 
 class ImageContent(BaseModel):
@@ -134,24 +129,8 @@ class ImageContent(BaseModel):
             image_url = {"url": f"data:image/jpeg;base64,{encoded_image}"}
         return image_url
 
-    def tokens(self, enc: tiktoken.Encoding) -> int:
-        """
-        Calculate the number of tokens in the image URL.
 
-        Parameters
-        ----------
-        enc : tiktoken.Encoding
-            The encoding to use for token counting.
-
-        Returns
-        -------
-        int
-            The number of tokens.
-        """
-        return len(enc.encode(self.image_url))
-
-
-class User(BaseModel):
+class User(BaseModelsTokenCount):
     role: str = "user"
     content: TextContent
 
@@ -233,10 +212,17 @@ class Conversation(BaseModel):
         str
             The model name encoding.
         """
-        if "35" in self.model_name:
-            return "gpt-3.5-turbo"
+        model_type = ModelNames.get_model_type(self.model_name)
+        if model_type == "OPENAI":
+            return "gpt-3.5-turbo" if "3.5" in self.model_name else "gpt-4"
+        elif model_type == "ANTHROPIC":
+            return self.model_name
+        elif model_type == "LMSTUDIO":
+            return (
+                "gpt-3.5-turbo"  # Assuming local models use OpenAI-compatible tokenizer
+            )
         else:
-            return "gpt-4"
+            raise ValueError(f"Unknown model type: {self.model_name}")
 
     @property
     def encoding(self) -> tiktoken.Encoding:
@@ -248,8 +234,7 @@ class Conversation(BaseModel):
         tiktoken.Encoding
             The encoding for the model.
         """
-        if self.model_name is not None:
-            return tiktoken.encoding_for_model(self.model_name_enc)
+        return tiktoken.encoding_for_model(self.model_name_enc)
 
     @property
     def total_tokens(self) -> int:
@@ -261,7 +246,9 @@ class Conversation(BaseModel):
         int
             The total number of tokens.
         """
-        return sum(msg.content.tokens(enc=self.encoding) for msg in self.messages_)
+        return sum(
+            get_token_count(msg.content.text, self.model_name) for msg in self.messages_
+        )
 
     @property
     def messages(self) -> List:
@@ -319,121 +306,121 @@ class Conversation(BaseModel):
         dict
             The payload for the LLM call.
         """
-        functions = [
-            {
-                "name": "execute_code_locally",
-                "description": "Execute provided Python code locally and return the standard output and standard error.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "code": {
-                            "type": "string",
-                            "description": "The Python code to execute, enclosed in triple backticks (```python) and (```).",
-                        }
-                    },
-                    "required": ["code"],
-                },
-            },
-            {
-                "name": "generate_code",
-                "description": "Generate Python code according to the past conversation and instructions provided by the user",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "instructions": {
-                            "type": "string",
-                            "description": "The complete set of instructions required to generate the expected code, including relevant past messages and user instructions",
-                        }
-                    },
-                    "required": ["instructions"],
-                },
-            },
-            {
-                "name": "debug_code",
-                "description": "Debugs the Python code provided and return corrected code and output",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "code": {
-                            "type": "string",
-                            "description": "The Python code to execute, enclosed in triple backticks (```python) and (```).",
-                        }
-                    },
-                    "required": ["code"],
-                },
-            },
-            {
-                "name": "data_analyst",
-                "description": "Perform data analysis on the provided data file and return data insights and analysis results",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "file_path": {
-                            "type": "string",
-                            "description": "Filepath to the data",
-                        },
-                        "instructions": {
-                            "type": "string",
-                            "description": "User instructions for the analysis",
-                        },
-                    },
-                    "required": ["file_path", "instructions"],
-                },
-            },
-            {
-                "name": "data_generator",
-                "description": "Generates code for synthetic data generation based on a prior data analysis. It requires the data_analysis function to be called before invoking the data_generator function. If the analysis results are not available, ensure that data_analysis is executed to obtain the necessary data insights.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "instructions": {
-                            "type": "string",
-                            "description": "Complete analysis output after calling the data analyst function. Do not modify the analysis.",
-                        }
-                    },
-                    "required": ["instructions"],
-                },
-            },
-            {
-                "name": "get_latest_changes_within_git",
-                "description": "Get the latest changes within a git repository",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "root_path": {
-                            "type": "string",
-                            "description": "Path to the git repository",
-                        }
-                    },
-                    "required": ["root_path"],
-                },
-            },
-            {
-                "name": "get_git_commit_prompt",
-                "description": "Get the git commit prompt",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "root_path": {
-                            "type": "string",
-                            "description": "Path to the git repository",
-                        }
-                    },
-                    "required": ["root_path"],
-                },
-            },
-        ]
 
-        return {
+        base_payload = {
             "model": self.model_name,
             "messages": self.to_dict,
             "max_tokens": max_tokens,
             "temperature": 0.3,
-            "timeout": 120,
             "stream": stream,
-            "functions": functions,
             "function_call": "auto",
+            "functions": [
+                {
+                    "name": "execute_code_locally",
+                    "description": "Execute provided Python code locally and return the standard output and standard error.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "code": {
+                                "type": "string",
+                                "description": "The Python code to execute, enclosed in triple backticks (```python) and (```).",
+                            }
+                        },
+                        "required": ["code"],
+                    },
+                },
+                {
+                    "name": "generate_code",
+                    "description": "Generate Python code according to the past conversation and instructions provided by the user",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "instructions": {
+                                "type": "string",
+                                "description": "The complete set of instructions required to generate the expected code, including relevant past messages and user instructions",
+                            }
+                        },
+                        "required": ["instructions"],
+                    },
+                },
+                {
+                    "name": "debug_code",
+                    "description": "Debugs the Python code provided and return corrected code and output",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "code": {
+                                "type": "string",
+                                "description": "The Python code to execute, enclosed in triple backticks (```python) and (```).",
+                            }
+                        },
+                        "required": ["code"],
+                    },
+                },
+                {
+                    "name": "data_analyst",
+                    "description": "Perform data analysis on the provided data file and return data insights and analysis results",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "file_path": {
+                                "type": "string",
+                                "description": "Filepath to the data",
+                            },
+                            "instructions": {
+                                "type": "string",
+                                "description": "User instructions for the analysis",
+                            },
+                        },
+                        "required": ["file_path", "instructions"],
+                    },
+                },
+                {
+                    "name": "data_generator",
+                    "description": "Generates code for synthetic data generation based on a prior data analysis. It requires the data_analysis function to be called before invoking the data_generator function. If the analysis results are not available, ensure that data_analysis is executed to obtain the necessary data insights.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "instructions": {
+                                "type": "string",
+                                "description": "Complete analysis output after calling the data analyst function. Do not modify the analysis.",
+                            }
+                        },
+                        "required": ["instructions"],
+                    },
+                },
+                {
+                    "name": "get_latest_changes_within_git",
+                    "description": "Get the latest changes within a git repository",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "root_path": {
+                                "type": "string",
+                                "description": "Path to the git repository",
+                            }
+                        },
+                        "required": ["root_path"],
+                    },
+                },
+                {
+                    "name": "get_git_commit_prompt",
+                    "description": "Get the git commit prompt",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "root_path": {
+                                "type": "string",
+                                "description": "Path to the git repository",
+                            }
+                        },
+                        "required": ["root_path"],
+                    },
+                },
+            ],
         }
+
+        return base_payload
 
     def append(self, message: Union[User, Assistant, System]) -> None:
         """
@@ -546,7 +533,7 @@ class Conversation(BaseModel):
                 partial_message += chunk.choices[0].delta.content
                 yield partial_message
 
-    async def call_llm(self, max_tokens: int, event_handler: ChainlitEventHandler):
+    async def call_llm(self, max_tokens: int, event_handler):
         """
         Call the LLM with context.
 
@@ -558,14 +545,23 @@ class Conversation(BaseModel):
             The event handler to handle the response chunks.
         """
         payload = self.__payload__(max_tokens)
-        response = await acompletion(
-            **payload,
-            api_base=os.getenv("AZURE_API_BASE"),
-            api_key=os.getenv("AZURE_API_KEY"),
-            api_version=os.getenv("AZURE_API_VERSION"),
-        )
-        async for chunk in response:
-            await event_handler.handle_chunk(chunk)
+        model_type = ModelNames.get_model_type(self.model_name)
+        api_base = ModelNames.get_api_base(self.model_name)
+
+        try:
+            response = await acompletion(
+                **payload,
+                api_base=(
+                    os.getenv(api_base)
+                    if api_base != "http://localhost:1234/v1"
+                    else api_base
+                ),
+                api_key=os.getenv(f"{model_type.upper()}_API_KEY"),
+            )
+            async for chunk in response:
+                await event_handler.handle_chunk(chunk)  # type: ignore
+        except Exception as e:
+            print(f"Error calling LLM: {str(e)}")
 
     def init_log(self) -> None:
         """

@@ -1,6 +1,6 @@
 from typing import AsyncGenerator
 
-from oai_types import CodeExecutionContent, Conversation, Interpreter, TextContent
+from llm_types import CodeExecutionContent, Conversation, Interpreter, TextContent
 from utils import get_git_commit, get_latest_changes
 
 convo = Conversation()

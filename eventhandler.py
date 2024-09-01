@@ -4,7 +4,7 @@ from typing import Optional
 import chainlit as cl
 
 import tools
-from oai_types import (
+from llm_types import (
     CodeExecutionContent,
     Conversation,
     FunctionCallContent,
@@ -18,6 +18,7 @@ from tools import data_analyst
 #############################################
 
 
+# noinspection DuplicatedCode
 class ChainlitEventHandler:
     def __init__(self, conversation: "Conversation"):
         """
@@ -79,8 +80,8 @@ class ChainlitEventHandler:
         """
         if self.streaming_response is None:
             self.streaming_response = cl.Step(
-                type="message",
-            )
+                type="undefined"
+            )  # If it's None, then it's undefined.
             await self.streaming_response.send()
 
         await self.streaming_response.stream_token(content)
@@ -166,19 +167,23 @@ class ChainlitEventHandler:
                 function_to_call = getattr(tools, self.current_tool_call.name, None)
                 code = json.loads(self.current_tool_call.arguments)["code"]
             except ValueError as _:
+                function_to_call = None
                 code = self.current_tool_call.arguments
 
-            accumulated_stdout = ""
-            async for result_chunk in function_to_call(
-                code, self.conversation.interpreter
-            ):
-                if isinstance(result_chunk, CodeExecutionContent):
-                    accumulated_stdout += result_chunk.stdout + "\n\n"
-                    result_chunk.stdout = accumulated_stdout
-                    self.current_step.output = result_chunk.text
-                    await self.conversation.add_assistant_msg(content=result_chunk)
-                    if _ := await self.current_step.update():
-                        self.current_tool_call = None
+            if function_to_call:
+                accumulated_stdout = ""
+                async for result_chunk in function_to_call(
+                    code, self.conversation.interpreter
+                ):
+                    if isinstance(result_chunk, CodeExecutionContent):
+                        accumulated_stdout += result_chunk.stdout + "\n\n"
+                        result_chunk.stdout = accumulated_stdout
+                        self.current_step.output = result_chunk.text
+                        await self.conversation.add_assistant_msg(content=result_chunk)
+                        if _ := await self.current_step.update():
+                            self.current_tool_call = None
+            else:
+                print(f"Function {self.current_tool_call.name} not found.")
 
         elif self.current_tool_call.name in [
             "generate_code",
@@ -190,13 +195,18 @@ class ChainlitEventHandler:
                     "instructions"
                 ]
             except ValueError as _:
+                function_to_call = None
                 instructions = self.current_tool_call.arguments
-            async for result_chunk in function_to_call(instructions):
-                if isinstance(result_chunk, CodeExecutionContent):
-                    self.current_step.output = result_chunk.text
-                    await self.conversation.add_assistant_msg(content=result_chunk)
-                    if _ := await self.current_step.update():
-                        self.current_tool_call = None
+
+            if function_to_call:
+                async for result_chunk in function_to_call(instructions):
+                    if isinstance(result_chunk, CodeExecutionContent):
+                        self.current_step.output = result_chunk.text
+                        await self.conversation.add_assistant_msg(content=result_chunk)
+                        if _ := await self.current_step.update():
+                            self.current_tool_call = None
+            else:
+                print(f"Function {self.current_tool_call.name} not found.")
 
         elif self.current_tool_call.name in [
             "get_latest_changes_within_git",
@@ -206,13 +216,18 @@ class ChainlitEventHandler:
                 function_to_call = getattr(tools, self.current_tool_call.name, None)
                 root_path = json.loads(self.current_tool_call.arguments)["root_path"]
             except ValueError as _:
+                function_to_call = None
                 root_path = self.current_tool_call.arguments
-            async for result_chunk in function_to_call(root_path):
-                if isinstance(result_chunk, TextContent):
-                    self.current_step.output = result_chunk.text
-                    await self.conversation.add_assistant_msg(content=result_chunk)
-                    if _ := await self.current_step.update():
-                        self.current_tool_call = None
+
+            if function_to_call:
+                async for result_chunk in function_to_call(root_path):
+                    if isinstance(result_chunk, TextContent):
+                        self.current_step.output = result_chunk.text
+                        await self.conversation.add_assistant_msg(content=result_chunk)
+                        if _ := await self.current_step.update():
+                            self.current_tool_call = None
+            else:
+                print(f"Function {self.current_tool_call.name} not found.")
         else:
             try:
                 file_path = json.loads(self.current_tool_call.arguments)["file_path"]

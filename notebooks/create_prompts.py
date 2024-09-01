@@ -10,7 +10,7 @@ from jinja2 import BaseLoader, Environment
 BASE_PATH = Path("/Users/shriramsunder/Projects/IntotheDeep")
 LIB_PATH = Path("")
 FILENAMES = [
-    BASE_PATH / ele for ele in ["app.py", "models.py", "oai_types.py", "utils.py"]
+    BASE_PATH / ele for ele in ["app.py", "models.py", "llm_types.py", "utils.py"]
 ]
 # FILENAMES += [
 #     Path(
