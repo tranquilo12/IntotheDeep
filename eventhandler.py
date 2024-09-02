@@ -38,6 +38,36 @@ class ChainlitEventHandler:
         self.token_text = None
         self.tokens_used = 0
         self.current_message_content = ""
+        self.buffer = ""
+
+    async def handle_sse_line(self, line: str) -> None:
+        """
+        Handle a single line from the SSE stream.
+
+        Parameters
+        ----------
+        line : str
+            A line from the SSE stream.
+        """
+        if line.startswith("data:"):
+            data = line[5:].strip()
+            if data == "[DONE]":
+                await self.handle_finish("stop")
+            else:
+                try:
+                    chunk = json.loads(data)
+                    await self.handle_chunk(chunk)
+                except json.JSONDecodeError:
+                    print(f"Error decoding JSON: {data}")
+        else:
+            self.buffer += line
+            if self.buffer.endswith("\n\n"):
+                try:
+                    chunk = json.loads(self.buffer)
+                    await self.handle_chunk(chunk)
+                except json.JSONDecodeError:
+                    print(f"Error decoding JSON: {self.buffer}")
+                self.buffer = ""
 
     async def handle_chunk(self, chunk) -> None:
         """
@@ -48,19 +78,17 @@ class ChainlitEventHandler:
         chunk :
             The chunk of data to handle.
         """
-        delta = chunk.choices[0].delta
-        finish_reason = chunk.choices[0].finish_reason
+        delta = chunk["choices"][0]["delta"]
+        finish_reason = chunk["choices"][0].get("finish_reason")
 
-        # Update token count and content for the current chunk
-        if delta.content:
-            chunk_tokens = len(self.conversation.encoding.encode(delta.content))
+        if "content" in delta:
+            content = delta["content"]
+            chunk_tokens = len(self.conversation.encoding.encode(content))
             self.tokens_used += chunk_tokens
-            self.current_message_content += delta.content
-
-        if delta.content:
-            await self.handle_content(delta.content, finish_reason)
-        elif delta.function_call:
-            await self.handle_function_call(delta.function_call, finish_reason)
+            self.current_message_content += content
+            await self.handle_content(content, finish_reason)
+        elif "function_call" in delta:
+            await self.handle_function_call(delta["function_call"], finish_reason)
 
         if finish_reason:
             await self.handle_finish(finish_reason)

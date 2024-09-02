@@ -9,6 +9,8 @@ import aiohttp
 import tiktoken
 from litellm import acompletion
 from pydantic import BaseModel, Field, computed_field
+from functions import FunctionSet, Payload, load_functions
+
 
 from models import ModelNames
 
@@ -190,7 +192,7 @@ class System(BaseModel):
 class Conversation(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     model_name: str = Field(
-        ..., default_factory=lambda: ModelNames.AZURE_GPT_35_TURBO.value
+        ..., default_factory=lambda: ModelNames.CLAUDE_3_5_SONNET.value
     )
     accumulated_arguments: Dict = Field(default={})
     active_function_calls: Dict = Field(default={})
@@ -200,6 +202,10 @@ class Conversation(BaseModel):
     context_code: str = Field(default_factory=str)
     hist_path: str = Field(default="")
     code_path: str = Field(default="")
+    functions_filepath: str | os.PathLike = Field(default="functions.json")
+    functions: FunctionSet = Field(
+        default_factory=lambda: load_functions("functions.json")
+    )
     current_interaction: dict = Field(default_factory=dict)
 
     @property
@@ -216,7 +222,7 @@ class Conversation(BaseModel):
         if model_type == "OPENAI":
             return "gpt-3.5-turbo" if "3.5" in self.model_name else "gpt-4"
         elif model_type == "ANTHROPIC":
-            return self.model_name
+            return "gpt-3.5-turbo"
         elif model_type == "LMSTUDIO":
             return (
                 "gpt-3.5-turbo"  # Assuming local models use OpenAI-compatible tokenizer
@@ -290,7 +296,7 @@ class Conversation(BaseModel):
             for m in self.messages_
         ]
 
-    def __payload__(self, max_tokens: int, stream: bool = True) -> dict:
+    def __payload__(self, max_tokens: int, stream: bool = True) -> Payload:
         """
         Generate the payload for the LLM call.
 
@@ -303,124 +309,16 @@ class Conversation(BaseModel):
 
         Returns
         -------
-        dict
+        Payload
             The payload for the LLM call.
         """
-
-        base_payload = {
-            "model": self.model_name,
-            "messages": self.to_dict,
-            "max_tokens": max_tokens,
-            "temperature": 0.3,
-            "stream": stream,
-            "function_call": "auto",
-            "functions": [
-                {
-                    "name": "execute_code_locally",
-                    "description": "Execute provided Python code locally and return the standard output and standard error.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "code": {
-                                "type": "string",
-                                "description": "The Python code to execute, enclosed in triple backticks (```python) and (```).",
-                            }
-                        },
-                        "required": ["code"],
-                    },
-                },
-                {
-                    "name": "generate_code",
-                    "description": "Generate Python code according to the past conversation and instructions provided by the user",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "instructions": {
-                                "type": "string",
-                                "description": "The complete set of instructions required to generate the expected code, including relevant past messages and user instructions",
-                            }
-                        },
-                        "required": ["instructions"],
-                    },
-                },
-                {
-                    "name": "debug_code",
-                    "description": "Debugs the Python code provided and return corrected code and output",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "code": {
-                                "type": "string",
-                                "description": "The Python code to execute, enclosed in triple backticks (```python) and (```).",
-                            }
-                        },
-                        "required": ["code"],
-                    },
-                },
-                {
-                    "name": "data_analyst",
-                    "description": "Perform data analysis on the provided data file and return data insights and analysis results",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "file_path": {
-                                "type": "string",
-                                "description": "Filepath to the data",
-                            },
-                            "instructions": {
-                                "type": "string",
-                                "description": "User instructions for the analysis",
-                            },
-                        },
-                        "required": ["file_path", "instructions"],
-                    },
-                },
-                {
-                    "name": "data_generator",
-                    "description": "Generates code for synthetic data generation based on a prior data analysis. It requires the data_analysis function to be called before invoking the data_generator function. If the analysis results are not available, ensure that data_analysis is executed to obtain the necessary data insights.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "instructions": {
-                                "type": "string",
-                                "description": "Complete analysis output after calling the data analyst function. Do not modify the analysis.",
-                            }
-                        },
-                        "required": ["instructions"],
-                    },
-                },
-                {
-                    "name": "get_latest_changes_within_git",
-                    "description": "Get the latest changes within a git repository",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "root_path": {
-                                "type": "string",
-                                "description": "Path to the git repository",
-                            }
-                        },
-                        "required": ["root_path"],
-                    },
-                },
-                {
-                    "name": "get_git_commit_prompt",
-                    "description": "Get the git commit prompt",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "root_path": {
-                                "type": "string",
-                                "description": "Path to the git repository",
-                            }
-                        },
-                        "required": ["root_path"],
-                    },
-                },
-            ],
-        }
-
-        return base_payload
+        return Payload.create(
+            model=self.model_name,
+            messages=self.to_dict,
+            max_tokens=max_tokens,
+            functions=self.functions,
+            stream=stream,
+        )
 
     def append(self, message: Union[User, Assistant, System]) -> None:
         """
@@ -535,33 +433,42 @@ class Conversation(BaseModel):
 
     async def call_llm(self, max_tokens: int, event_handler):
         """
-        Call the LLM with context.
+        Call the LLM with context using the LiteLLM proxy.
 
         Parameters
         ----------
         max_tokens : int
             The maximum number of tokens.
-        event_handler : object
+        event_handler : ChainlitEventHandler
             The event handler to handle the response chunks.
         """
         payload = self.__payload__(max_tokens)
-        model_type = ModelNames.get_model_type(self.model_name)
-        api_base = ModelNames.get_api_base(self.model_name)
+        url = payload.api_base + "/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {payload.api_key}",
+        }
 
-        try:
-            response = await acompletion(
-                **payload,
-                api_base=(
-                    os.getenv(api_base)
-                    if api_base != "http://localhost:1234/v1"
-                    else api_base
-                ),
-                api_key=os.getenv(f"{model_type.upper()}_API_KEY"),
-            )
-            async for chunk in response:
-                await event_handler.handle_chunk(chunk)  # type: ignore
-        except Exception as e:
-            print(f"Error calling LLM: {str(e)}")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                headers=headers,
+                json=payload.model_dump(exclude=["api_key", "api_base"]),
+            ) as response:
+                if response.status == 200:
+                    async for line in response.content:
+                        await event_handler.handle_sse_line(
+                            line.decode("utf-8").strip()
+                        )
+                else:
+                    error_text = await response.text()
+                    print(f"Error calling LLM: HTTP {response.status}, {error_text}")
+
+    def load_functions(self) -> None:
+        """
+        Load functions from the specified JSON file.
+        """
+        self.functions = load_functions(self.functions_filepath)
 
     def init_log(self) -> None:
         """

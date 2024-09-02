@@ -1,0 +1,20 @@
+model_list:
+  - model_name: claude-3.5
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet-20240620
+      api_key: "os.environ/ANTHROPIC_API_KEY" # does os.getenv("AZURE_API_KEY_EU")
+
+  - model_name: claude-3
+    litellm_params:
+      model: anthropic/claude-3-opus-20240620
+      api_key: "os.environ/ANTHROPIC_API_KEY" # does os.getenv("AZURE_API_KEY_EU")
+
+  - model_name: deepseek-coder-v2
+    litellm_params:
+      model: openai/DeepSeek-Coder-V2-Lite-Instruct-GGUF
+      api_key: "os.environ/ANTHROPIC_API_KEY" # does os.getenv("AZURE_API_KEY_EU")
+      api_base: http://host.docker.internal:1234/v1
+
+litellm_settings:
+  set_verbose: true
+  drop_params: true
