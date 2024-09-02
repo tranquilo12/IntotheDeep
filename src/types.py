@@ -70,7 +70,7 @@ def get_latest_changes(root_path: Union[str, os.PathLike]) -> Tuple[GitDiff, str
         try:
             diff = repo.git.diff("HEAD", file)
             summary = summarize_diff(diff)
-            diffs.append(GitFileDiff(filepath=file, diff=diff))
+            diffs.append(GitDiff(file, diff))
             summaries.append(f"{file}: {summary}")
         except GitCommandError:
             pass
@@ -136,7 +136,7 @@ def get_git_commit(diff: GitDiff) -> "Conversation":
                 "Try and be as detailed as possible, format it within points if needed. ",
                 "You will be provided with an object of the structure: ",
                 f"Git Diff Struct:",
-                json.dumps(GitFileDiff.model_json_schema()),
+                json.dumps(GitDiff.__dict__()),
             ]
         ),
     )
