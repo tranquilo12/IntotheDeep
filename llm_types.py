@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, computed_field
 from functions import FunctionSet, Payload, load_functions
 
 
-from models import ModelNames
+from models import ModelNames, get_token_count
 
 
 #############################################
@@ -44,19 +44,6 @@ class Interpreter(BaseModel):
                 result = await response.text()
                 result = json.loads(result)
                 return result["stdout"], result["stderr"]
-
-
-def get_token_count(text: str, model_name: str) -> int:
-    model_type = ModelNames.get_model_type(model_name)
-
-    if model_type == "OPENAI" or model_type == "GGUF":
-        encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
-        return len(encoding.encode(text))
-    elif model_type == "LMSTUDIO":
-        encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
-        return len(encoding.encode(text))
-    else:
-        raise ValueError(f"Unknown model type: {model_name}")
 
 
 class BaseModelsTokenCount(BaseModel):
@@ -207,28 +194,6 @@ class Conversation(BaseModel):
     current_interaction: dict = Field(default_factory=dict)
 
     @property
-    def model_name_enc(self) -> str:
-        """
-        Get the model name encoding.
-
-        Returns
-        -------
-        str
-            The model name encoding.
-        """
-        model_type = ModelNames.get_model_type(self.model_name)
-        if model_type == "OPENAI":
-            return "gpt-3.5-turbo" if "3.5" in self.model_name else "gpt-4"
-        elif model_type == "ANTHROPIC":
-            return "gpt-3.5-turbo"
-        elif model_type == "LMSTUDIO":
-            return (
-                "gpt-3.5-turbo"  # Assuming local models use OpenAI-compatible tokenizer
-            )
-        else:
-            raise ValueError(f"Unknown model type: {self.model_name}")
-
-    @property
     def encoding(self) -> tiktoken.Encoding:
         """
         Get the encoding for the model.
@@ -238,7 +203,7 @@ class Conversation(BaseModel):
         tiktoken.Encoding
             The encoding for the model.
         """
-        return tiktoken.encoding_for_model(self.model_name_enc)
+        return ModelNames.get_encoding(self.model_name)
 
     @property
     def total_tokens(self) -> int:
@@ -250,9 +215,7 @@ class Conversation(BaseModel):
         int
             The total number of tokens.
         """
-        return sum(
-            get_token_count(msg.content.text, self.model_name) for msg in self.messages_
-        )
+        return get_token_count(self.messages_, self.model_name)
 
     @property
     def messages(self) -> List:
@@ -461,12 +424,6 @@ class Conversation(BaseModel):
                 else:
                     error_text = await response.text()
                     print(f"Error calling LLM: HTTP {response.status}, {error_text}")
-
-    def load_functions(self) -> None:
-        """
-        Load functions from the specified JSON file.
-        """
-        self.functions = load_functions(self.functions_filepath)
 
     def init_log(self) -> None:
         """
