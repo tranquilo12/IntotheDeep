@@ -50,11 +50,9 @@ def get_token_count(text: str, model_name: str) -> int:
     model_type = ModelNames.get_model_type(model_name)
 
     if model_type == "OPENAI" or model_type == "GGUF":
-        encoding = tiktoken.encoding_for_model(
-            "gpt-3.5-turbo" if "35" in model_name else "gpt-4"
-        )
+        encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
         return len(encoding.encode(text))
-    elif model_type == "ANTHROPIC":
+    elif model_type == "LMSTUDIO":
         encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
         return len(encoding.encode(text))
     else:
