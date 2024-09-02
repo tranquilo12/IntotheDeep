@@ -2,8 +2,8 @@ import base64
 import json
 import os
 import re
-import sys
-from pathlib import PosixPath, WindowsPath
+from functools import wraps
+from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Tuple, Union
 from uuid import uuid4
 
@@ -18,47 +18,31 @@ from src.models import ModelNames, get_token_count
 from utils.functions import FunctionSet, Payload, load_functions
 
 
-def str_to_path(path: str | List) -> Optional[WindowsPath | PosixPath]:
-    """
-    Convert a string or list of strings to a path object, based on the OS.
-
-    Parameters
-    ----------
-    path : Union[str, List[str]]
-        The string or list of strings to convert to a path object.
-
-    Returns
-    -------
-    Optional[Union[WindowsPath, PosixPath]]
-        The corresponding path object based on the OS, or None if the input is invalid.
-    """
+def str_to_path(path: Union[str, List[str]]) -> Path:
     if isinstance(path, list):
-        if sys.platform == "win32":
-            path = WindowsPath("\\\\".join(path))
-        else:
-            path = PosixPath("/".join(path))
-    else:
-        if sys.platform == "win32":
-            path = WindowsPath(path)
-        else:
-            path = PosixPath(path)
+        return Path(*path)
+    return Path(path)
 
-    return path
+
+def add_token_count(cls):
+    @property
+    @wraps(cls)
+    def tokens(self) -> int:
+        return get_token_count(self.text, self.model_name)
+
+    cls.tokens = tokens
+    return cls
 
 
 #############################################
 ## For all the Git Related Functions ########
 #############################################
-class GitFileDiff(BaseModel):
-    filepath: Union[str, os.PathLike]
-    diff: str
+GitDiff = Union[
+    Dict[str, Union[str, os.PathLike]], List[Dict[str, Union[str, os.PathLike]]]
+]
 
 
-class AllGitFileDiffs(BaseModel):
-    diffs: List[GitFileDiff]
-
-
-def get_latest_changes(root_path: str | os.PathLike) -> Tuple[List[GitFileDiff], str]:
+def get_latest_changes(root_path: Union[str, os.PathLike]) -> Tuple[GitDiff, str]:
     """
     Get the latest changes within a git repository.
 
@@ -129,7 +113,7 @@ def summarize_diff(diff: str) -> str:
     return ", ".join(description) if description else "No changes detected"
 
 
-def get_git_commit(diff: GitFileDiff) -> "Conversation":
+def get_git_commit(diff: GitDiff) -> "Conversation":
     """
     Get the git commit prompt.
 
@@ -177,20 +161,7 @@ def get_git_commit(diff: GitFileDiff) -> "Conversation":
 ####################################################
 ########## LLM Function Calling Types ##############
 ####################################################
-class BaseModelsTokenCount(BaseModel):
-    @property
-    def tokens(self) -> int:
-        """
-        Calculate the number of tokens in the generated Markdown text.
-        Returns
-        -------
-        int
-            The number of tokens.
-        """
-        return get_token_count(self.text, self.model_name)
-
-
-class CodeExecutionContent(BaseModelsTokenCount):
+class CodeExecutionContent(BaseModel):
     type: Literal["code_execution"] = "code_execution"
     code: str  # The executed code
     stdout: Optional[str] = None  # Standard output from execution
@@ -218,7 +189,7 @@ class CodeExecutionContent(BaseModelsTokenCount):
         return markdown_text
 
 
-class TextContent(BaseModelsTokenCount):
+class TextContent(BaseModel):
     type: Literal["text"] = "text"
     text: str
 
@@ -248,14 +219,6 @@ class ImageContent(BaseModel):
         return image_url
 
 
-class User(BaseModelsTokenCount):
-    role: str = "user"
-    content: TextContent
-
-    def __init__(self, msg: str, **data):
-        super().__init__(content=TextContent(text=msg), **data)
-
-
 class FunctionCallContent(BaseModel):
     type: Literal["function_call"] = "function_call"
     name: str  # The name of the function to call
@@ -279,6 +242,17 @@ class FunctionCallContent(BaseModel):
         return len(enc.encode(self.name)) + len(enc.encode(self.arguments))
 
 
+# TODO: Add support for other content types like images, etc.
+@add_token_count
+class User(BaseModel):
+    role: str = "user"
+    content: TextContent
+
+    def __init__(self, msg: str, **data):
+        super().__init__(content=TextContent(text=msg), **data)
+
+
+@add_token_count
 class Assistant(BaseModel):
     role: str = "assistant"
     content: Union[TextContent, CodeExecutionContent, FunctionCallContent]
@@ -294,6 +268,7 @@ class Assistant(BaseModel):
         super().__init__(content=content, **data)
 
 
+@add_token_count
 class System(BaseModel):
     role: str = "system"
     content: TextContent
