@@ -1,13 +1,15 @@
+from typing import Any, Dict, List
+
 import requests
-from models import ModelNames
-from typing import List, Dict, Any
 from qdrant_client import QdrantClient
-from notebooks.utils import initialize_qdrant, CodeChunk, get_embeddings
+
+from notebooks.utils.utils import CodeChunk, get_embeddings
+from src.models import ModelNames
 
 MODEL = ModelNames.DEEPSEEK_CODER_V2.value
 
 
-class RAGSystem:
+class RAG:
     def __init__(
         self,
         qdrant_client: QdrantClient,
@@ -182,7 +184,7 @@ class RAGSystem:
         return context
 
 
-if __name__ == "__main__":
-    qdrant_client = initialize_qdrant()  # You need to implement this function
-    rag_system = RAGSystem(qdrant_client)
-    context = rag_system.process_query("How does the embedding generation work?")
+# if __name__ == "__main__":
+#     qdrant_client = initialize_qdrant()  # You need to implement this function
+#     rag_system = RAG(qdrant_client)
+#     context = rag_system.process_query("How does the embedding generation work?")

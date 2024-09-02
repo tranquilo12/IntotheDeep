@@ -5,9 +5,9 @@ from chainlit.input_widget import Select, Switch
 from chainlit.types import AskFileResponse
 from dotenv import load_dotenv
 
-from eventhandler import ChainlitEventHandler
-from llm_types import Conversation, Dict, System, User
-from models import ModelNames
+from utils.eventhandler import ChainlitEventHandler
+from src.types import Conversation, Dict, System, User
+from src.models import ModelNames
 
 
 @cl.password_auth_callback

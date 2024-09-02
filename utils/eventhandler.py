@@ -3,14 +3,14 @@ from typing import Optional
 
 import chainlit as cl
 
-import tools
-from llm_types import (
+import utils.tools as tools
+from src.types import (
     CodeExecutionContent,
     Conversation,
     FunctionCallContent,
     TextContent,
 )
-from tools import data_analyst
+from utils.tools import data_analyst
 
 
 #############################################

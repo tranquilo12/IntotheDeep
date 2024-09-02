@@ -1,7 +1,13 @@
 from typing import AsyncGenerator
 
-from llm_types import CodeExecutionContent, Conversation, Interpreter, TextContent
-from utils import get_git_commit, get_latest_changes
+from src.types import (
+    CodeExecutionContent,
+    Conversation,
+    Interpreter,
+    TextContent,
+    get_git_commit,
+    get_latest_changes,
+)
 
 convo = Conversation()
 

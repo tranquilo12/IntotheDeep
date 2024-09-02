@@ -1,4 +1,4 @@
-from notebooks.utils import (
+from notebooks.utils.utils import (
     setup_tree_sitter,
     process_repository,
     get_embeddings,

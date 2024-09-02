@@ -2,7 +2,7 @@ import os
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Literal
 import json
-from models import ModelNames
+from src.models import ModelNames
 from enum import Enum
 
 

@@ -2,50 +2,181 @@ import base64
 import json
 import os
 import re
-from typing import Dict, List, Literal, Optional, Tuple, Union
+import sys
+from pathlib import PosixPath, WindowsPath
+from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Tuple, Union
 from uuid import uuid4
 
 import aiohttp
 import tiktoken
+from git import GitCommandError, Repo
 from litellm import acompletion
 from pydantic import BaseModel, Field, computed_field
-from functions import FunctionSet, Payload, load_functions
+
+from src.interpreter import Interpreter
+from src.models import ModelNames, get_token_count
+from utils.functions import FunctionSet, Payload, load_functions
 
 
-from models import ModelNames, get_token_count
+def str_to_path(path: str | List) -> Optional[WindowsPath | PosixPath]:
+    """
+    Convert a string or list of strings to a path object, based on the OS.
+
+    Parameters
+    ----------
+    path : Union[str, List[str]]
+        The string or list of strings to convert to a path object.
+
+    Returns
+    -------
+    Optional[Union[WindowsPath, PosixPath]]
+        The corresponding path object based on the OS, or None if the input is invalid.
+    """
+    if isinstance(path, list):
+        if sys.platform == "win32":
+            path = WindowsPath("\\\\".join(path))
+        else:
+            path = PosixPath("/".join(path))
+    else:
+        if sys.platform == "win32":
+            path = WindowsPath(path)
+        else:
+            path = PosixPath(path)
+
+    return path
 
 
 #############################################
-########## Interpreter related ##############
+## For all the Git Related Functions ########
 #############################################
-class Interpreter(BaseModel):
-    endpoint: str = Field(default="http://localhost:8888/execute")
-
-    class Config:
-        arbitrary_types_allowed = True  # Allow the aiohttp ClientSession
-
-    async def run(self, code: str) -> Tuple[str, str]:
-        """
-        Execute the provided code using an HTTP POST request to the specified endpoint.
-
-        Parameters
-        ----------
-        code : str
-            The code to execute.
-
-        Returns
-        -------
-        Tuple[str, str]
-            A tuple containing the standard output and standard error from the code execution.
-        """
-        session_timeout = aiohttp.ClientTimeout(total=None)
-        async with aiohttp.ClientSession(timeout=session_timeout) as session:
-            async with session.post(self.endpoint, json={"code": code}) as response:
-                result = await response.text()
-                result = json.loads(result)
-                return result["stdout"], result["stderr"]
+class GitFileDiff(BaseModel):
+    filepath: Union[str, os.PathLike]
+    diff: str
 
 
+class AllGitFileDiffs(BaseModel):
+    diffs: List[GitFileDiff]
+
+
+def get_latest_changes(root_path: str | os.PathLike) -> Tuple[List[GitFileDiff], str]:
+    """
+    Get the latest changes within a git repository.
+
+    Parameters
+    ----------
+    root_path : Union[str, os.PathLike]
+        Path to the git repository.
+
+    Returns
+    -------
+    Tuple[List[GitFileDiff], str]
+        A tuple containing the original diffs and their summaries.
+    """
+    root_path = str_to_path(root_path)
+    try:
+        repo = Repo(root_path)
+    except GitCommandError:
+        raise ValueError("Invalid Git repository path")
+
+    diffs = []
+    summaries = []
+    staged_files = [item.a_path for item in repo.index.diff("HEAD")]
+
+    for file in staged_files:
+        try:
+            diff = repo.git.diff("HEAD", file)
+            summary = summarize_diff(diff)
+            diffs.append(GitFileDiff(filepath=file, diff=diff))
+            summaries.append(f"{file}: {summary}")
+        except GitCommandError:
+            pass
+
+    summary_text = "\n".join(summaries)
+    return diffs, summary_text
+
+
+def summarize_diff(diff: str) -> str:
+    """
+    Generate a human-readable summary of the diff.
+
+    Parameters
+    ----------
+    diff : str
+        A string representing the diff output.
+
+    Returns
+    -------
+    str
+        A string containing a summary of the changes in the diff.
+    """
+    lines = diff.splitlines()
+    added = sum(
+        1 for line in lines if line.startswith("+") and not line.startswith("+++")
+    )
+    removed = sum(
+        1 for line in lines if line.startswith("-") and not line.startswith("---")
+    )
+    modified = len(lines) - added - removed
+
+    description = []
+    if added:
+        description.append(f"{added} lines added")
+    if removed:
+        description.append(f"{removed} lines removed")
+    if modified:
+        description.append(f"{modified} lines modified")
+
+    return ", ".join(description) if description else "No changes detected"
+
+
+def get_git_commit(diff: GitFileDiff) -> "Conversation":
+    """
+    Get the git commit prompt.
+
+    Parameters
+    ----------
+    diff : GitFileDiff
+        The git file diff.
+
+    Returns
+    -------
+    Conversation
+        Git commit prompt.
+    """
+    # Start the system message with a list of rules, it will be further
+    # appended depending on the code_only flag
+    system_message = System(
+        "\n\n".join(
+            [
+                "Your only task is to provide a very comprehensive git commit message. ",
+                "Try and be as detailed as possible, format it within points if needed. ",
+                "You will be provided with an object of the structure: ",
+                f"Git Diff Struct:",
+                json.dumps(GitFileDiff.model_json_schema()),
+            ]
+        ),
+    )
+
+    # Get the formatted messages
+    user_message = User(
+        "\n\n".join(
+            [
+                f"Here is the git diff structure between the <gitDiff></gitDiff> tags: ",
+                f"<gitDiff>{diff}</gitDiff>",
+                "Give me a very comprehensive git commit message, in markdown. ",
+                "Explain the benefits of the changes, and the drawbacks of the changes. ",
+                "If they're just formatting changes, then say so, be succinct when needed. ",
+            ]
+        ),
+    )
+
+    # Create the conversation object
+    return Conversation(messages_=[system_message, user_message])
+
+
+####################################################
+########## LLM Function Calling Types ##############
+####################################################
 class BaseModelsTokenCount(BaseModel):
     @property
     def tokens(self) -> int:
@@ -169,6 +300,43 @@ class System(BaseModel):
 
     def __init__(self, msg: str, **data):
         super().__init__(content=TextContent(text=msg), **data)
+
+
+##################################################
+########## Function Calling related ##############
+##################################################
+class FunctionExecutor:
+    @staticmethod
+    async def execute_code(
+        code: str, interpreter: "Interpreter"
+    ) -> AsyncGenerator["CodeExecutionContent", None]:
+        code = code.lstrip("```python").rstrip("```")
+        stdout, stderr = await interpreter.run(code)
+        for line in stdout.splitlines():
+            yield CodeExecutionContent(code=code, stdout=line, stderr="")
+        if stderr:
+            yield CodeExecutionContent(code=code, stdout="", stderr=stderr)
+
+    @staticmethod
+    async def analyze_data(
+        file_path: str, instructions: str = None
+    ) -> AsyncGenerator["TextContent", None]:
+        # Simplified implementation for brevity
+        analysis = f"Analysis of {file_path} with instructions: {instructions}"
+        yield TextContent(text=analysis)
+
+    @staticmethod
+    async def git_operations(root_path: str) -> AsyncGenerator["TextContent", None]:
+        diffs, diffsummary = get_latest_changes(root_path)
+        yield TextContent(text=diffsummary)
+
+    @staticmethod
+    async def generate_code(
+        instructions: str,
+    ) -> AsyncGenerator["CodeExecutionContent", None]:
+        # Simplified implementation for brevity
+        generated_code = f"# Generated code based on: {instructions}"
+        yield CodeExecutionContent(code=generated_code, stdout="", stderr="")
 
 
 #############################################
@@ -519,3 +687,10 @@ class Conversation(BaseModel):
 
         with open(self.code_path, "w") as f:
             json.dump(data, f, indent=4)
+
+    async def execute_function(
+        self, function_name: str, *args, **kwargs
+    ) -> AsyncGenerator[Any, None]:
+        executor = FunctionExecutor.get_executor(function_name)
+        async for result in executor.execute(*args, **kwargs):
+            yield result
