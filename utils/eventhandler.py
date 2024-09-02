@@ -88,6 +88,7 @@ class ChainlitEventHandler:
             self.current_message_content += content
             await self.handle_content(content, finish_reason)
         elif "function_call" in delta:
+            self.function_call_made = True
             await self.handle_function_call(delta["function_call"], finish_reason)
 
         if finish_reason:
@@ -96,23 +97,20 @@ class ChainlitEventHandler:
         await self.update_token_usage()
 
     async def handle_content(self, content: str, finish_reason: Optional[str]) -> None:
-        """
-        Handle content from the conversation.
-
-        Parameters
-        ----------
-        content : str
-            The content to handle.
-        finish_reason : Optional[str]
-            The reason for finishing.
-        """
         if self.streaming_response is None:
-            self.streaming_response = cl.Step(
-                type="undefined"
-            )  # If it's None, then it's undefined.
+            if self.function_call_made:
+                # This is a tool/function response
+                self.streaming_response = cl.Step(type="tool")
+            else:
+                # This is a normal assistant response
+                self.streaming_response = cl.Message(content="")
             await self.streaming_response.send()
 
-        await self.streaming_response.stream_token(content)
+        if isinstance(self.streaming_response, cl.Step):
+            await self.streaming_response.stream_token(content)
+        else:
+            self.streaming_response.content += content
+            await self.streaming_response.update()
 
         if finish_reason:
             await self.conversation.add_assistant_msg(
