@@ -36,13 +36,11 @@ class ChainlitEventHandler:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {payload.api_key}",
         }
+        url = payload.api_base + "/chat/completions"
+        payload = payload.model_dump(exclude={"api_key", "api_base"})
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url=payload.api_base + "/chat/completions",
-                headers=headers,
-                json=payload.model_dump(exclude={"api_key", "api_base"}),
-            ) as response:
+            async with session.post(url=url, headers=headers, json=payload) as response:
                 if response.status == 200:
                     async for line in response.content:
                         await self.handle_sse_line(line.decode("utf-8").strip())

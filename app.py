@@ -100,9 +100,21 @@ async def generate_settings(
     ).send()
 
 
+def read_files_into_context(files: list):
+    all_code, file_paths = [], []
+    for py_f in files:
+        with open(py_f.path, "r", encoding="utf-8") as f:
+            all_code.append(f"### filename: {py_f.name} ###\n\n{f.read()}\n\n###")
+            file_paths.append(py_f.path)
+            file_mapping[py_f.path] = py_f.name
+    return "\n\n".join(all_code), file_paths
+
+
 @cl.on_chat_start
 async def on_chat_start():
+    # For removing files from context
     global file_mapping
+    file_mapping = {}
 
     files: List[AskFileResponse] | None = await cl.AskFileMessage(
         content="Please upload python files only.",
@@ -125,46 +137,28 @@ async def on_chat_start():
     ).send()
 
     if files:
-        all_code = []
-        file_paths = []
-        file_mapping = {}
-        for py_f in files:
-            with open(py_f.path, "r", encoding="utf-8") as f:
-                code = f.read()
-                formatted_code = f"### filename: {py_f.name} ###\n\n{code}\n\n###"
-                all_code.append(formatted_code)
-                file_paths.append(py_f.path)
-                file_mapping[py_f.path] = py_f.name
-
-        CONVO: Conversation = init_convo(
-            context_code="".join(all_code),
-            user_question="",
-            file_paths=file_paths,
-        )
-        event_handler: ChainlitEventHandler = ChainlitEventHandler(CONVO)
-
-        cl.user_session.set("CONVO", CONVO)
-        cl.user_session.set("event_handler", event_handler)
+        all_code, file_paths = read_files_into_context(files)
 
         first_msg: Dict = await cl.AskUserMessage(
             content="What do you want to do with these uploaded files?",
-            timeout=60,
+            timeout=360,
         ).send()
-
-        # TODO: There must be way to determine how to ensure the assistant message
-        # is not displayed ABOVE the first user message.
         if first_msg:
-            await event_handler.add_message(User(msg=first_msg["output"]))
+            CONVO: Conversation = init_convo(
+                context_code=all_code,
+                user_question=first_msg["output"],
+                file_paths=file_paths,
+            )
+            event_handler: ChainlitEventHandler = ChainlitEventHandler(CONVO)
             await event_handler.call_llm(max_tokens=MAX_TOKENS)
-
-            cl.user_session.set("CONVO", CONVO)
             cl.user_session.set("event_handler", event_handler)
 
 
-# TODO: The culprit is here somewhere, please ID the lines of code that are causing the issue
 @cl.on_message
 async def on_message(message: cl.Message):
     event_handler: ChainlitEventHandler = cl.user_session.get("event_handler")
+    # Add message already sends the message to the UI, no need to send it again, it's handled in the
+    # event handler stage.
     await event_handler.add_message(message=User(msg=message.content))
     await event_handler.call_llm(max_tokens=MAX_TOKENS)
 
