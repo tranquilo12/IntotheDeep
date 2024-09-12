@@ -1,6 +1,6 @@
 from typing import AsyncGenerator
 
-from src.types import (
+from src._types import (
     CodeExecutionContent,
     Conversation,
     Interpreter,

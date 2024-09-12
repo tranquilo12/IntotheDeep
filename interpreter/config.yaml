@@ -17,4 +17,4 @@ model_list:
 
 litellm_settings:
   set_verbose: true
-  drop_params: true
+  drop_params: true # This is just true cause anthropic's function definition is not incorporated into our frontend yet.

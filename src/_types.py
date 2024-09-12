@@ -1,13 +1,11 @@
 import base64
 import json
 import os
-import re
 from functools import wraps
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Literal, Optional, Tuple, Union
+from typing import AsyncGenerator, Dict, List, Literal, Optional, Tuple, Union
 from uuid import uuid4
 
-import aiohttp
 import tiktoken
 from git import GitCommandError, Repo
 from litellm import acompletion
@@ -53,7 +51,7 @@ def get_latest_changes(root_path: Union[str, os.PathLike]) -> Tuple[GitDiff, str
 
     Returns
     -------
-    Tuple[List[GitFileDiff], str]
+    Tuple[GitDiff, str]
         A tuple containing the original diffs and their summaries.
     """
     root_path = str_to_path(root_path)
@@ -70,7 +68,7 @@ def get_latest_changes(root_path: Union[str, os.PathLike]) -> Tuple[GitDiff, str
         try:
             diff = repo.git.diff("HEAD", file)
             summary = summarize_diff(diff)
-            diffs.append(GitDiff(file, diff))
+            diffs.append({"file": file, "diff": diff})
             summaries.append(f"{file}: {summary}")
         except GitCommandError:
             pass
@@ -136,7 +134,7 @@ def get_git_commit(diff: GitDiff) -> "Conversation":
                 "Try and be as detailed as possible, format it within points if needed. ",
                 "You will be provided with an object of the structure: ",
                 f"Git Diff Struct:",
-                json.dumps(GitDiff.__dict__()),
+                json.dumps(GitDiff.__dict__),
             ]
         ),
     )
@@ -242,7 +240,6 @@ class FunctionCallContent(BaseModel):
         return len(enc.encode(self.name)) + len(enc.encode(self.arguments))
 
 
-# TODO: Add support for other content types like images, etc.
 @add_token_count
 class User(BaseModel):
     role: str = "user"
@@ -319,22 +316,14 @@ class FunctionExecutor:
 #############################################
 class Conversation(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
-    model_name: str = Field(
-        ..., default_factory=lambda: ModelNames.CLAUDE_3_5_SONNET.value
-    )
-    accumulated_arguments: Dict = Field(default={})
-    active_function_calls: Dict = Field(default={})
+    model_name: str = Field(default=ModelNames.CLAUDE_3_5_SONNET.value)
     messages_: List[Union[User, Assistant, System]] = Field(default_factory=list)
     interpreter: Interpreter = Field(default_factory=Interpreter)
     files: List[str] = Field(default_factory=list)
     context_code: str = Field(default_factory=str)
-    hist_path: str = Field(default="")
-    code_path: str = Field(default="")
-    functions_filepath: str | os.PathLike = Field(default="functions.json")
     functions: FunctionSet = Field(
         default_factory=lambda: load_functions("functions.json")
     )
-    current_interaction: dict = Field(default_factory=dict)
 
     @property
     def encoding(self) -> tiktoken.Encoding:
@@ -424,17 +413,6 @@ class Conversation(BaseModel):
             stream=stream,
         )
 
-    def append(self, message: Union[User, Assistant, System]) -> None:
-        """
-        Append a message to the conversation.
-
-        Parameters
-        ----------
-        message : Union[User, Assistant, System]
-            The message to append.
-        """
-        self.messages_.append(message)
-
     def remove_file(self, filename: str) -> None:
         """
         Remove a file from the conversation and update the context code.
@@ -461,43 +439,6 @@ class Conversation(BaseModel):
                 all_code.append(formatted_code)
 
         self.context_code = "".join(all_code)
-
-    def add_user_msg(self, msg: str) -> None:
-        """
-        Add a user message to the conversation.
-
-        Parameters
-        ----------
-        msg : str
-            The user message.
-        """
-        self.append(User(msg=msg))
-
-    async def add_assistant_msg(
-        self,
-        content: Union[TextContent, CodeExecutionContent, FunctionCallContent] = None,
-        **kwargs,  # Additional kwargs (e.g., name, tool_call_id)
-    ) -> None:
-        """
-        Adds an assistant message to the conversation with flexible content types.
-
-        Parameters
-        ----------
-        content : Union[TextContent, CodeExecutionContent, FunctionCallContent], optional
-            The content of the assistant's message. Can be TextContent, CodeExecutionContent, or FunctionCallContent.
-        **kwargs : dict
-            Additional keyword arguments to pass to the Assistant constructor (e.g., name, tool_call_id).
-
-        Raises
-        ------
-        ValueError
-            If content is not provided.
-        """
-        if content is None:
-            raise ValueError("Content must be provided.")
-
-        assistant_message = Assistant(content=content, **kwargs)
-        self.append(assistant_message)
 
     @staticmethod
     async def call_llm_no_context(messages: List[dict]):
@@ -535,137 +476,8 @@ class Conversation(BaseModel):
                 partial_message += chunk.choices[0].delta.content
                 yield partial_message
 
-    async def call_llm(self, max_tokens: int, event_handler):
-        """
-        Call the LLM with context using the LiteLLM proxy.
-
-        Parameters
-        ----------
-        max_tokens : int
-            The maximum number of tokens.
-        event_handler : ChainlitEventHandler
-            The event handler to handle the response chunks.
-        """
-        payload = self.__payload__(max_tokens)
-        url = payload.api_base + "/chat/completions"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {payload.api_key}",
-        }
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url,
-                headers=headers,
-                json=payload.model_dump(exclude=["api_key", "api_base"]),
-            ) as response:
-                if response.status == 200:
-                    async for line in response.content:
-                        await event_handler.handle_sse_line(
-                            line.decode("utf-8").strip()
-                        )
-                else:
-                    error_text = await response.text()
-                    print(f"Error calling LLM: HTTP {response.status}, {error_text}")
-
-    def init_log(self) -> None:
-        """
-        Initialize the logger files.
-        """
-        if self.hist_path:
-            with open(self.hist_path, "w") as file:
-                json.dump([], file)
-
-        if self.code_path:
-            with open(self.code_path, "w") as file:
-                json.dump([], file)
-
-    def log_user_message(self, user_message: str) -> None:
-        """
-        Log a user message.
-
-        Parameters
-        ----------
-        user_message : str
-            The user message to log.
-        """
-        self.current_interaction["user_message"] = user_message
-
-    def log_chat_message(self, chat_message: str) -> None:
-        """
-        Log a chat message.
-
-        Parameters
-        ----------
-        chat_message : str
-            The chat message to log.
-        """
-        self.current_interaction["chat_message"] = chat_message
-        self.save_convo()
-
-    def save_convo(self) -> None:
-        """
-        Save the current interaction to the history file.
-        """
-        if os.path.exists(self.hist_path):
-            with open(self.hist_path, "r") as file:
-                data = json.load(file)
-        else:
-            data = []
-
-        # Append the new interaction
-        data.append(self.current_interaction)
-
-        with open(self.hist_path, "w") as file:
-            json.dump(data, file, indent=4)
-
-        self.current_interaction = {}
-
-    def get_current_log(self) -> List[dict]:
-        """
-        Get the current log from the history file.
-
-        Returns
-        -------
-        List[dict]
-            The current log.
-        """
-        if os.path.exists(self.hist_path):
-            with open(self.hist_path, "r") as file:
-                data = json.load(file)
-            return data
-        else:
-            return []
-
-    def extract_and_append_code(self, chat_message) -> None:
-        """
-        Extract code blocks from the chat message and append them to the code file.
-
-        Parameters
-        ----------
-        chat_message : str
-            The chat message containing code blocks.
-        """
-        code_block_pattern = re.compile(r"```python(.*?)```", re.DOTALL)
-        code_blocks = code_block_pattern.findall(chat_message)
-
-        if not os.path.exists(self.code_path):
-            with open(self.code_path, "w") as f:
-                json.dump([], f)
-
-        # Load the existing data from the JSON file
-        with open(self.code_path, "r") as f:
-            data = json.load(f)
-
-        for block in code_blocks:
-            data.append({"code": block.strip()})
-
-        with open(self.code_path, "w") as f:
-            json.dump(data, f, indent=4)
-
-    async def execute_function(
-        self, function_name: str, *args, **kwargs
-    ) -> AsyncGenerator[Any, None]:
-        executor = FunctionExecutor.get_executor(function_name)
-        async for result in executor.execute(*args, **kwargs):
-            yield result
+    async def add_assistant_msg(
+        self, content: Union[TextContent, CodeExecutionContent, FunctionCallContent]
+    ):
+        assistant_message = Assistant(content=content)
+        self.append(assistant_message)

@@ -7,3 +7,6 @@ jupyter
 jupyter_kernel_gateway
 nbformat
 chainlit
+fastapi
+uvicorn
+qdrant-client

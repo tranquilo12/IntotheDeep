@@ -1,54 +1,62 @@
 import json
-from typing import Optional
+from typing import Optional, Union
 
+import aiohttp
 import chainlit as cl
 
 import utils.tools as tools
-from src.types import (
+from src._types import (
+    Assistant,
     CodeExecutionContent,
     Conversation,
     FunctionCallContent,
+    System,
     TextContent,
+    User,
 )
 from utils.tools import data_analyst
 
 
-#############################################
-############## Event Handler ################
-#############################################
-
-
-# noinspection DuplicatedCode
 class ChainlitEventHandler:
     def __init__(self, conversation: "Conversation"):
-        """
-        Initialize the ChainlitEventHandler.
+        self.conversation: "Conversation" = conversation
+        self.current_step: Optional[cl.Step] = None
+        self.streaming_response: Optional[Union[cl.Step, cl.Message]] = None
+        self.current_tool_call: Optional[FunctionCallContent] = None
+        self.function_call_made: bool = False
+        self.initial_tokens: int = self.conversation.total_tokens
+        self.token_text: Optional[cl.Text] = None
+        self.tokens_used: int = 0
+        self.current_message_content: str = ""
+        self.buffer: str = ""
 
-        Parameters
-        ----------
-        conversation : Conversation
-            The conversation object.
-        """
-        self.conversation = conversation
-        self.current_step = None
-        self.streaming_response = None
-        self.current_tool_call = None
-        self.function_call_made = False
-        self.initial_tokens = self.conversation.total_tokens
-        self.token_text = None
-        self.tokens_used = 0
-        self.current_message_content = ""
-        self.buffer = ""
+    async def call_llm(self, max_tokens: int = 4096):
+        payload = self.conversation.__payload__(max_tokens)
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {payload.api_key}",
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url=payload.api_base + "/chat/completions",
+                headers=headers,
+                json=payload.model_dump(exclude={"api_key", "api_base"}),
+            ) as response:
+                if response.status == 200:
+                    async for line in response.content:
+                        await self.handle_sse_line(line.decode("utf-8").strip())
+                else:
+                    error_text = await response.text()
+                    print(f"Error calling LLM: HTTP {response.status}, {error_text}")
+
+    async def add_message(self, message: Assistant | User | System):
+        self.conversation.messages_.append(message)
+        if isinstance(message, Assistant):
+            message = cl.Message(content=message.content.text, author=message.role)
+            await message.send()
 
     async def handle_sse_line(self, line: str) -> None:
-        """
-        Handle a single line from the SSE stream.
-
-        Parameters
-        ----------
-        line : str
-            A line from the SSE stream.
-        """
         if line.startswith("data:"):
             data = line[5:].strip()
             if data == "[DONE]":
@@ -70,14 +78,6 @@ class ChainlitEventHandler:
                 self.buffer = ""
 
     async def handle_chunk(self, chunk) -> None:
-        """
-        Handle a chunk of data from the conversation.
-
-        Parameters
-        ----------
-        chunk :
-            The chunk of data to handle.
-        """
         delta = chunk["choices"][0]["delta"]
         finish_reason = chunk["choices"][0].get("finish_reason")
 
@@ -98,38 +98,20 @@ class ChainlitEventHandler:
 
     async def handle_content(self, content: str, finish_reason: Optional[str]) -> None:
         if self.streaming_response is None:
-            if self.function_call_made:
-                # This is a tool/function response
-                self.streaming_response = cl.Step(type="tool")
-            else:
-                # This is a normal assistant response
-                self.streaming_response = cl.Message(content="")
+            self.streaming_response = cl.Message(content="", author="Assistant")
             await self.streaming_response.send()
 
-        if isinstance(self.streaming_response, cl.Step):
-            await self.streaming_response.stream_token(content)
-        else:
-            self.streaming_response.content += content
-            await self.streaming_response.update()
+        self.streaming_response.content += content
+        await self.streaming_response.update()
 
         if finish_reason:
-            await self.conversation.add_assistant_msg(
-                content=TextContent(text=self.current_message_content)
+            await self.add_message(
+                message=Assistant(TextContent(text=self.current_message_content))
             )
 
     async def handle_function_call(
         self, function_call: dict, finish_reason: Optional[str]
     ) -> None:
-        """
-        Handle a function call from the conversation.
-
-        Parameters
-        ----------
-        function_call : dict
-            The function call to handle.
-        finish_reason : Optional[str]
-            The reason for finishing.
-        """
         self.function_call_made = True
 
         if self.current_tool_call is None:
@@ -150,9 +132,6 @@ class ChainlitEventHandler:
             await self.execute_function()
 
     async def update_token_usage(self):
-        """
-        Update the token usage for the conversation.
-        """
         current_tokens = self.conversation.total_tokens
 
         if self.token_text is None:
@@ -180,9 +159,6 @@ class ChainlitEventHandler:
             await self.current_step.update()
 
     async def execute_function(self):
-        """
-        Execute the function call.
-        """
         if self.current_tool_call.name in [
             "execute_code_locally",
             "debug_code",
@@ -270,21 +246,11 @@ class ChainlitEventHandler:
                         self.current_tool_call = None
 
     async def handle_finish(self, finish_reason: str) -> None:
-        """
-        Handle the finish of a conversation step.
-
-        Parameters
-        ----------
-        finish_reason : str
-            The reason for finishing.
-        """
         if finish_reason == "function_call" and self.current_tool_call:
             await self.execute_function()
 
         elif self.streaming_response and not self.function_call_made:
-            await self.conversation.add_assistant_msg(
-                content=TextContent(text=self.current_message_content)
-            )
+            await self.streaming_response.update()
 
         if self.streaming_response:
             await self.streaming_response.update()

@@ -1,5 +1,3 @@
-version: "3.11"
-
 services:
   jupyter:
     build:
@@ -14,15 +12,11 @@ services:
       dockerfile: Dockerfile.lite
       args:
         target: runtime
-    image: ghcr.io/berriai/litellm:main-stable
-    #########################################
-    ## Uncomment these lines to start proxy with a config.yaml file ##
     volumes:
       - ./config.yaml:/app/config.yaml
-    ###############################################
     ports:
       - "4000:4000" # Map the container port to the host, change the host port if necessary
     environment:
-        ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     env_file:
       - .env # Load local .env file

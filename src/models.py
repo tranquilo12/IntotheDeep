@@ -1,6 +1,7 @@
 import enum
+from typing import List, Union
+
 import tiktoken
-from typing import Union, List
 
 
 class ModelTypes(enum.Enum):
@@ -40,7 +41,7 @@ class ModelNames(enum.Enum):
     def get_encoding_name(cls, model_name: str) -> str:
         model_type = cls.get_model_type(model_name)
         if model_type in [ModelTypes.OPENAI.value, ModelTypes.LOCAL.value]:
-            return "gpt-3.5-turbo" if "3.5" in model_name else "gpt-4"
+            return "gpt-3.5-turbo"
         elif model_type == ModelTypes.ANTHROPIC.value:
             return "gpt-3.5-turbo"  # Using OpenAI's encoding for Anthropic models
         else:
@@ -53,14 +54,19 @@ class ModelNames(enum.Enum):
 
     @classmethod
     def count_tokens(cls, text: str, model_name: str) -> int:
+        # TODO: Clean this up, this is going to be a very expensive process.
         encoding = cls.get_encoding(model_name)
         return len(encoding.encode(text))
 
 
 def get_token_count(text: Union[str, List], model_name: str) -> int:
     """
-    Parameters:
-        text: The list of message objects.
+    Get the token count for a given text and model name.
+
+    Parameters
+    ----------
+    text : The list of message objects.
+    model_name : The name of the model to use for token counting.
     """
     if isinstance(text, List):
         return sum(ModelNames.count_tokens(t.content.text, model_name) for t in text)
